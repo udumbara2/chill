@@ -1,0 +1,7 @@
+{
+  "version": "v20260814-235231",
+  "createdAt": "2026-08-14T15:53:32.703Z",
+  "source": "workcopy",
+  "goal": "新增 execute_code 工具（CodeExecutor 本地模式：写文件+shell:false 根治 PowerShell 劫持，isDangerousCode 绊线，python 候选链）+ 上下文膨胀防护三层防线（read_file 分页契约 2000行/40K/PARTIAL、系统闸门 50K+spill 落盘 72h、search_sessions 大小提示、read_file 描述同步；体验窗口实测反馈修正：显式范围长行不报错、search_content 1MB→20MB）",
+  "archiveRecord": "iteration-v20260814-235231.json"
+}

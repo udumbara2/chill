@@ -1,0 +1,9 @@
+node_modules/
+dist/
+packages/dist/
+dist-electron/
+.preview-sessions/
+*.tsbuildinfo
+packages/electron/resources/
+build-log.txt
+build-cli-log.txt

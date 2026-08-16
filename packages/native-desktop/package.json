@@ -1,0 +1,31 @@
+{
+  "name": "@assistant-ai/native-desktop",
+  "version": "0.0.1",
+  "description": "AI 助手桌面原语：截屏 + 键鼠注入（napi-rs，Windows 先行）",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "author": "udumbara2 <udumbara2@live.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/udumbara2/chill.git",
+    "directory": "packages/native-desktop"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "napi": {
+    "binaryName": "native-desktop"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.8.5"
+  },
+  "scripts": {
+    "build": "napi build --release --platform"
+  }
+}

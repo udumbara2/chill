@@ -1,0 +1,37 @@
+{
+  "name": "@assistant-ai/ui",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b",
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.0"
+  },
+  "dependencies": {
+    "@assistant-ai/core": "workspace:*",
+    "@langchain/core": "^1.1.0",
+    "@langchain/langgraph": "^1.1.1",
+    "@tiptap/core": "^3.0.0",
+    "@modelcontextprotocol/sdk": "^1.23.0",
+    "@tiptap/starter-kit": "^3.20.4",
+    "@tiptap/vue-3": "^3.20.4",
+    "@vue-flow/controls": "^1.1.1",
+    "@vue-flow/core": "^1.33.0",
+    "@vue-flow/minimap": "^1.5.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "als-browser": "^1.0.1",
+    "highlight.js": "^11.8.0",
+    "markdown-it": "^13.0.1",
+    "markdown-it-anchor": "^8.6.7",
+    "markdown-it-katex": "^2.0.3",
+    "markdown-it-task-lists": "^2.1.1",
+    "pinia": "^3.0.4",
+    "prosemirror-state": "^1.4.0",
+    "prosemirror-view": "^1.41.0",
+    "vue": "^3.3.4",
+    "vue-router": "^4.2.4"
+  }
+}

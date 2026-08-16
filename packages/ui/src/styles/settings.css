@@ -1,0 +1,432 @@
+/* ==========================================================================
+   settings.css — 设置域共享样式契约层（第一期）
+   --------------------------------------------------------------------------
+   三层路线：令牌层(global.css CSS 变量) → 契约层(本文件) → 基元组件层(二期)
+
+   防漂移规约：
+   1. 新增设置控件必须先查本文件；契约没有的规格先补进契约再使用，
+      禁止页内手搓。
+   2. 命名空间纪律：所有契约类必须带 settings- 前缀，禁止无前缀通用名。
+      反面案例：settings-section 已被 Home.vue 用作设置覆盖层容器，
+      section-head 已被 KnowledgeSettings scoped 使用——全局无前缀类会
+      命中全应用任意同名元素。
+   3. 新增契约类前必须 grep 模板确认类名全 ui/src 无占用。
+
+   字号规则（rem 基准防陷阱）：根字号 html{font-size:13px}，故
+   --font-size-sm = 0.875rem = 11.375px、--font-size-base = 13px。
+   13px 文本一律用 var(--font-size-base)，严禁映射到 --font-size-sm。
+   裸 px 例外清单（契约固有，不强行凑令牌）：18 / 15 / 14 / 12 / 11px。
+
+   留白/滚动铁律：settings-main 只承担布局与滚动（唯一滚动容器），
+   不带 padding；所有留白与 860px 限宽唯一归属 .settings-page。
+
+   二期路线：本契约经实际使用稳定后，专门一轮做基元组件包装
+   （SettingsButton / SettingsInput / SettingsBadge / ...），
+   组件内仅引用本契约类，零重样式；届时本文件成为组件的外置样式表。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   页面骨架
+   -------------------------------------------------------------------------- */
+
+/* 唯一留白与限宽层 */
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  max-width: 860px;
+}
+
+/* 页头：标题 + 描述 + 右侧操作 */
+.settings-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+  margin-bottom: var(--spacing-1);
+}
+
+.settings-page-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-page-description {
+  margin: var(--spacing-1) 0 0;
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+}
+
+/* 右侧操作区（页头与分组头通用） */
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-shrink: 0;
+}
+
+/* 说明行 */
+.settings-tip {
+  margin: 0 0 var(--spacing-4);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* 分组：同层第二个及之后的分组才出现分隔线（~ 选择器天然跳过 v-if 缺席的组） */
+.settings-group {
+  margin-top: var(--spacing-6);
+}
+
+.settings-page .settings-group ~ .settings-group {
+  border-top: 1px solid var(--border-color);
+  padding-top: var(--spacing-4);
+}
+
+/* 分组头：小节标题 + 右侧操作 */
+.settings-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+}
+
+.settings-group-head h2,
+.settings-group-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 条目卡片（四种历史卡片收敛为一） */
+.settings-card {
+  background-color: var(--background-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.settings-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 无内边距变体：内部自管 padding 的卡片（如可展开条目） */
+.settings-card.settings-card-flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   按钮（未来 SettingsButton；修饰类 = variant prop）
+   -------------------------------------------------------------------------- */
+
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  padding: 5px 14px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-md);
+  background-color: var(--background-primary);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  font-family: inherit;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-btn:hover:not(:disabled) {
+  background-color: var(--background-secondary);
+}
+
+.settings-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-btn-primary {
+  border-color: var(--primary-color);
+  background-color: var(--primary-color);
+  color: #fff;
+}
+
+.settings-btn-primary:hover:not(:disabled) {
+  border-color: var(--primary-hover);
+  background-color: var(--primary-hover);
+}
+
+.settings-btn-danger {
+  border-color: rgba(var(--error-color-rgb), 0.35);
+  color: var(--error-color);
+}
+
+.settings-btn-danger:hover:not(:disabled) {
+  border-color: rgba(var(--error-color-rgb), 0.5);
+  background-color: rgba(var(--error-color-rgb), 0.08);
+}
+
+.settings-btn-warning {
+  border-color: rgba(var(--warning-color-rgb), 0.35);
+  background-color: rgba(var(--warning-color-rgb), 0.08);
+  color: var(--warning-color);
+}
+
+.settings-btn-warning:hover:not(:disabled) {
+  border-color: rgba(var(--warning-color-rgb), 0.5);
+  background-color: rgba(var(--warning-color-rgb), 0.15);
+}
+
+/* 图标按钮（未来 SettingsIconButton；修饰类 = variant prop）：
+   卡片行内的轻量操作（设置/删除等），幽灵式无框，hover 才出现底色 */
+.settings-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.settings-icon-btn:hover {
+  background-color: var(--background-secondary);
+  color: var(--text-primary);
+}
+
+.settings-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 危险操作变体：hover 淡红底 + 红图标，替代历史上的红框红叉 */
+.settings-icon-btn-danger:hover {
+  background-color: rgba(var(--error-color-rgb), 0.08);
+  color: var(--error-color);
+}
+
+/* --------------------------------------------------------------------------
+   表单控件（未来 SettingsInput 及配套）
+   -------------------------------------------------------------------------- */
+
+.settings-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--background-primary);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.settings-input:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(var(--primary-color-rgb), 0.12);
+}
+
+.settings-input:disabled {
+  background-color: var(--background-secondary);
+  cursor: not-allowed;
+}
+
+textarea.settings-input {
+  resize: vertical;
+}
+
+.settings-label {
+  display: block;
+  margin-bottom: var(--spacing-2);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.settings-hint {
+  margin: var(--spacing-1) 0 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   徽章（未来 SettingsBadge；修饰类 = variant prop）
+   -------------------------------------------------------------------------- */
+
+.settings-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.settings-badge-neutral {
+  background-color: var(--background-tertiary);
+  color: var(--text-secondary);
+}
+
+.settings-badge-primary {
+  background-color: rgba(var(--primary-color-rgb), 0.1);
+  color: var(--primary-color);
+}
+
+.settings-badge-success {
+  background-color: rgba(var(--success-color-rgb), 0.12);
+  color: var(--success-color);
+}
+
+.settings-badge-warning {
+  background-color: rgba(var(--warning-color-rgb), 0.12);
+  color: var(--warning-color);
+}
+
+.settings-badge-danger {
+  background-color: rgba(var(--error-color-rgb), 0.1);
+  color: var(--error-color);
+}
+
+/* 强调（内置/系统类标识，紫色系） */
+.settings-badge-accent {
+  background-color: rgba(124, 58, 237, 0.08);
+  color: #7c3aed;
+}
+
+/* --------------------------------------------------------------------------
+   空状态（未来 SettingsEmpty）
+   -------------------------------------------------------------------------- */
+
+.settings-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-10) 0;
+  text-align: center;
+}
+
+.settings-empty-icon {
+  font-size: 28px;
+  line-height: 1;
+  color: var(--text-tertiary);
+}
+
+.settings-empty-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.settings-empty-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* --------------------------------------------------------------------------
+   提示卡（未来 SettingsNotice；修饰类 = variant prop）
+   -------------------------------------------------------------------------- */
+
+.settings-notice {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.settings-notice-info {
+  background-color: rgba(var(--primary-color-rgb), 0.08);
+  border: 1px solid rgba(var(--primary-color-rgb), 0.2);
+  color: var(--primary-color);
+}
+
+.settings-notice-success {
+  background-color: rgba(var(--success-color-rgb), 0.08);
+  border: 1px solid rgba(var(--success-color-rgb), 0.25);
+  color: var(--success-color);
+}
+
+.settings-notice-error {
+  background-color: rgba(var(--error-color-rgb), 0.06);
+  border: 1px solid rgba(var(--error-color-rgb), 0.25);
+  color: var(--error-color);
+}
+
+/* --------------------------------------------------------------------------
+   开关（未来 SettingsSwitch；四套历史实现收敛为一）
+   -------------------------------------------------------------------------- */
+
+.settings-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.settings-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.settings-switch-slider {
+  position: absolute;
+  inset: 0;
+  background-color: var(--border-hover);
+  border-radius: 999px;
+  transition: background-color var(--transition-fast);
+}
+
+.settings-switch-slider::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+  background-color: var(--background-primary);
+  border-radius: 50%;
+  transition: transform var(--transition-fast);
+}
+
+.settings-switch input:checked + .settings-switch-slider {
+  background-color: var(--primary-color);
+}
+
+.settings-switch input:checked + .settings-switch-slider::before {
+  transform: translateX(16px);
+}
+
+/* 键盘可达：焦点可见 */
+.settings-switch input:focus-visible + .settings-switch-slider {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}

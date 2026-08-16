@@ -1,0 +1,153 @@
+diff --git a/build/ink.js b/build/ink.js
+index 30019a073d38ed05dca08f6221af187c429a536b..dce9a3738460cd4fbde560c4c6417cf9926c1885 100644
+--- a/build/ink.js
++++ b/build/ink.js
+@@ -319,7 +319,11 @@ export default class Ink {
+         // Only apply when writing to a real TTY — piped output always gets trailing newlines.
+         const isFullscreen = this.options.stdout.isTTY && outputHeight >= this.options.stdout.rows;
+         const outputToRender = isFullscreen ? output : output + '\n';
+-        if (this.lastOutputHeight >= this.options.stdout.rows) {
++        // chill fix(pnpm patch):>= 改为 >。帧高恰好等于终端行数时原实现每帧
++        // clearTerminal 全屏清屏重写(光标随写入全程旅行,形成抖动);
++        // 恰好满屏的帧走增量路径完全正确(无尾部换行,增量数学成立),
++        // 清屏只对真正"超出屏幕"的帧(>)才有必要
++        if (this.lastOutputHeight > this.options.stdout.rows) {
+             const sync = shouldSynchronize(this.options.stdout);
+             if (sync) {
+                 this.options.stdout.write(bsu);
+diff --git a/build/log-update.js b/build/log-update.js
+index 73e297d0185fa4861c33eaa11761d1418588f0c9..5642a34f0341709a25fae9f846e51d2e5b143a5a 100644
+--- a/build/log-update.js
++++ b/build/log-update.js
+@@ -161,7 +161,10 @@ const createIncremental = (stream, { showCursor = false } = {}) => {
+             buffer.push(ansiEscapes.eraseLines(previousVisible - visibleCount + extraSlot), ansiEscapes.cursorUp(visibleCount));
+         }
+         else {
+-            buffer.push(ansiEscapes.cursorUp(previousVisible - 1));
++            // chill fix(pnpm patch):上一帧带尾部换行时,写入结束后光标停在"末行之后",
++            // 回到帧顶需多上移 1 行(与上方 shrink 分支的 extraSlot 同一修正逻辑);
++            // 原实现 cursorUp(previousVisible - 1) 少移 1 行,导致帧每渲染一次向下爬 1 行
++            buffer.push(ansiEscapes.cursorUp(previousVisible - 1 + (previousOutput.endsWith('\n') ? 1 : 0)));
+         }
+         for (let i = 0; i < visibleCount; i++) {
+             const isLastLine = i === visibleCount - 1;
+diff --git a/build/hooks/use-input.js b/build/hooks/use-input.js
+--- a/build/hooks/use-input.js
++++ b/build/hooks/use-input.js
+@@ -90,6 +90,11 @@ const useInput = (inputHandler, options = {}) => {
+             else {
+                 input = keypress.sequence;
+             }
++            // chill fix(pnpm patch):use-input 的 input 兜底——终端输入天然对抗性
++            // (CPR 应答、DSR 响应、未识别带修饰位 CSI),parseKeypress 对这类序列
++            // 会产出 keypress.name/sequence = undefined,原实现 input.startsWith
++            // 空引用崩溃;统一兜底为空串,未知序列静默忽略
++            if (input === undefined) input = '';
+             if (!keypress.isKittyProtocol &&
+                 nonAlphanumericKeys.includes(keypress.name)) {
+                 input = '';
+diff --git a/build/cursor-helpers.js b/build/cursor-helpers.js
+--- a/build/cursor-helpers.js
++++ b/build/cursor-helpers.js
+@@ -23,8 +23,8 @@ export const buildCursorSuffix = (visibleLineCount, cursorPosition) => {
+ /**
+ Build escape sequence to move cursor from previousCursorPosition back to the bottom of output.
+ This must be done before eraseLines or any operation that assumes cursor is at the bottom.
+ */
+-export const buildReturnToBottom = (previousLineCount, previousCursorPosition) => {
++export const buildReturnToBottom = (previousLineCount, previousCursorPosition, previousHadTrailingNewline = true) => {
+     if (!previousCursorPosition) {
+         return '';
+     }
+@@ -30,5 +30,9 @@ export const buildReturnToBottom = (previousLineCount, previousCursorPosition) =
+     // PreviousLineCount includes trailing newline, so visible lines = previousLineCount - 1
+     // cursor is at previousCursorPosition.y, need to go to line (previousLineCount - 1)
+-    const down = previousLineCount - 1 - previousCursorPosition.y;
++    // chill fix(pnpm patch):无尾部换行(恰好满屏)的帧写完后,物理光标停在末行末尾,
++    // 比账本记录的 y 高 1 行——buildCursorSuffix 的"帧以换行结尾"假设在满屏模式不
++    // 成立;下移距离 +1 补偿,否则"仅移动光标"的渲染(←/→ 移动插入点)每按一次就
++    // 向上爬一行,形成斜向上漂移的鬼影光标
++    const down = previousLineCount - 1 - previousCursorPosition.y + (previousHadTrailingNewline ? 0 : 1);
+     return ((down > 0 ? ansiEscapes.cursorDown(down) : '') + ansiEscapes.cursorTo(0));
+ };
+@@ -39,7 +43,7 @@ export const buildReturnToBottom = (previousLineCount, previousCursorPosition) =
+ */
+ export const buildCursorOnlySequence = (input) => {
+     const hidePrefix = input.cursorWasShown ? hideCursorEscape : '';
+-    const returnToBottom = buildReturnToBottom(input.previousLineCount, input.previousCursorPosition);
++    const returnToBottom = buildReturnToBottom(input.previousLineCount, input.previousCursorPosition, input.previousHadTrailingNewline ?? true);
+     const cursorSuffix = buildCursorSuffix(input.visibleLineCount, input.cursorPosition);
+     return hidePrefix + returnToBottom + cursorSuffix;
+ };
+@@ -46,10 +50,10 @@ export const buildCursorOnlySequence = (input) => {
+ Build the prefix that hides cursor and returns to bottom before erasing or rewriting.
+ Returns empty string if cursor was not shown.
+ */
+-export const buildReturnToBottomPrefix = (cursorWasShown, previousLineCount, previousCursorPosition) => {
++export const buildReturnToBottomPrefix = (cursorWasShown, previousLineCount, previousCursorPosition, previousHadTrailingNewline = true) => {
+     if (!cursorWasShown) {
+         return '';
+     }
+     return (hideCursorEscape +
+-        buildReturnToBottom(previousLineCount, previousCursorPosition));
++        buildReturnToBottom(previousLineCount, previousCursorPosition, previousHadTrailingNewline));
+ };
+diff --git a/build/log-update.js b/build/log-update.js
+--- a/build/log-update.js
++++ b/build/log-update.js
+@@ -36,8 +36,9 @@ const createStandard = (stream, { showCursor = false } = {}) => {
+         if (str === previousOutput && cursorChanged) {
+             stream.write(buildCursorOnlySequence({
+                 cursorWasShown,
+                 previousLineCount,
+                 previousCursorPosition,
++                previousHadTrailingNewline: previousOutput.endsWith('\n'),
+                 visibleLineCount: visibleCount,
+                 cursorPosition: activeCursor,
+             }));
+@@ -43,7 +43,7 @@ const createStandard = (stream, { showCursor = false } = {}) => {
+         }
+         else {
+-            previousOutput = str;
+-            const returnPrefix = buildReturnToBottomPrefix(cursorWasShown, previousLineCount, previousCursorPosition);
++            const returnPrefix = buildReturnToBottomPrefix(cursorWasShown, previousLineCount, previousCursorPosition, previousOutput.endsWith('\n'));
++            previousOutput = str;
+             stream.write(returnPrefix +
+                 ansiEscapes.eraseLines(previousLineCount) +
+                 str +
+@@ -56,6 +57,6 @@ const createStandard = (stream, { showCursor = false } = {}) => {
+     };
+     render.clear = () => {
+-        const prefix = buildReturnToBottomPrefix(cursorWasShown, previousLineCount, previousCursorPosition);
++        const prefix = buildReturnToBottomPrefix(cursorWasShown, previousLineCount, previousCursorPosition, previousOutput.endsWith('\n'));
+         stream.write(prefix + ansiEscapes.eraseLines(previousLineCount));
+         previousOutput = '';
+         previousLineCount = 0;
+@@ -128,8 +129,9 @@ const createIncremental = (stream, { showCursor = false } = {}) => {
+         if (str === previousOutput && cursorChanged) {
+             stream.write(buildCursorOnlySequence({
+                 cursorWasShown,
+                 previousLineCount: previousLines.length,
+                 previousCursorPosition,
++                previousHadTrailingNewline: previousOutput.endsWith('\n'),
+                 visibleLineCount: visibleCount,
+                 cursorPosition: activeCursor,
+             }));
+@@ -137,7 +139,7 @@ const createIncremental = (stream, { showCursor = false } = {}) => {
+             cursorWasShown = activeCursor !== undefined;
+             return true;
+         }
+-        const returnPrefix = buildReturnToBottomPrefix(cursorWasShown, previousLines.length, previousCursorPosition);
++        const returnPrefix = buildReturnToBottomPrefix(cursorWasShown, previousLines.length, previousCursorPosition, previousOutput.endsWith('\n'));
+         if (str === '\n' || previousOutput.length === 0) {
+             const cursorSuffix = buildCursorSuffix(visibleCount, activeCursor);
+             stream.write(returnPrefix +
+@@ -194,7 +196,7 @@ const createIncremental = (stream, { showCursor = false } = {}) => {
+         return true;
+     };
+     render.clear = () => {
+-        const prefix = buildReturnToBottomPrefix(cursorWasShown, previousLines.length, previousCursorPosition);
++        const prefix = buildReturnToBottomPrefix(cursorWasShown, previousLines.length, previousCursorPosition, previousOutput.endsWith('\n'));
+         stream.write(prefix + ansiEscapes.eraseLines(previousLines.length));
+         previousOutput = '';
+         previousLines = [];

@@ -1,0 +1,44 @@
+{
+  "name": "@assistant-ai/electron",
+  "version": "0.0.1",
+  "private": true,
+  "main": "dist/electron-main.js",
+  "scripts": {
+    "build": "rimraf dist && tsc --noEmit && esbuild src/electron-main.ts src/preload.ts --bundle --platform=node --format=cjs --target=node18 --external:electron --external:tsx --external:@assistant-ai/native-desktop --alias:node-fetch=../core/src/shims/nativeFetch.ts --outdir=dist && node scripts/build-worker.mjs",
+    "dev:main": "esbuild src/electron-main.ts src/preload.ts --bundle --platform=node --format=cjs --target=node18 --external:electron --external:tsx --external:@assistant-ai/native-desktop --outdir=dist --watch",
+    "build:renderer": "cd ../.. && vue-tsc && node scripts/clean-dist.cjs && vite build",
+    "dev:renderer": "cd ../.. && vite",
+    "start:dev": "concurrently \"pnpm dev:renderer\" \"pnpm dev:main\" \"powershell -Command \\\"Start-Sleep 3; cd ../..; $env:NODE_ENV='development'; electron .\\\"\"",
+    "pack": "cd ../.. && electron-builder",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@assistant-ai/core": "workspace:*",
+    "@assistant-ai/native-desktop": "workspace:*",
+    "@langchain/core": "^1.1.46",
+    "@langchain/langgraph": "^1.1.1",
+    "chokidar": "^3.6.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "iconv-lite": "^0.7.2",
+    "jschardet": "^3.1.4",
+    "langsmith": "^0.7.15"
+  },
+  "devDependencies": {
+    "@assistant-ai/ui": "workspace:*",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.5.0",
+    "@vitejs/plugin-vue": "^4.3.1",
+    "concurrently": "^8.2.0",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.6.3",
+    "esbuild": "^0.25.0",
+    "rimraf": "^5.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.1.6",
+    "vite": "^4.4.9",
+    "vite-plugin-node-polyfills": "^0.24.0",
+    "vue-tsc": "^2.1.6"
+  }
+}

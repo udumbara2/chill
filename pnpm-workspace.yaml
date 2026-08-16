@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+allowBuilds:
+  electron: true
+  esbuild: true
+  lzma-native: true
+  vue-demi: true
+patchedDependencies:
+  ink@6.8.0: patches/ink@6.8.0.patch
