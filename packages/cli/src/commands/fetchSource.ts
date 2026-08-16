@@ -13,7 +13,7 @@ import { decompressArchive, downloadFile, getOwnProjectPaths } from '@assistant-
 
 // 源码仓库地址（Gitee 优先，GitHub 兜底；CHILL_SOURCE_URL 环境变量可显式覆盖）
 const GITHUB_REPO = 'https://github.com/udumbara2/chill'
-const GITEE_REPO = 'https://gitee.com/udumbara2/chill'
+const GITEE_REPO = 'https://gitee.com/assistant-ai/chill'
 
 export interface Pointer {
   active: 'npm' | 'self'
