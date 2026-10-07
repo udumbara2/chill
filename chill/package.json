@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @assistant-ai/electron dev:renderer",
-    "build": "pnpm --filter @assistant-ai/native-desktop build && pnpm --filter @assistant-ai/core build && pnpm --filter @assistant-ai/web build && pnpm --filter @assistant-ai/electron build:renderer && pnpm --filter @assistant-ai/electron build",
+    "build": "pnpm --filter @assistant-ai/native-desktop build && pnpm --filter @assistant-ai/core build && pnpm --filter @assistant-ai/web build && pnpm --filter @assistant-ai/ui build && pnpm --filter @assistant-ai/electron build:renderer && pnpm --filter @assistant-ai/electron build",
     "electron:dev": "pnpm --filter @assistant-ai/electron start:dev",
     "electron:build": "pnpm run build && pnpm --filter @assistant-ai/electron run pack",
     "electron:start": "pnpm --filter @assistant-ai/electron build && electron .",
