@@ -1,0 +1,30 @@
+# chill-relay.service — 【Linux-only】systemd 单元（M1b 部署用）
+# 依据实施计划 §10：绝对路径 node、EnvironmentFile 600 权限、RestartSec=2、
+# StartLimitBurst=10 防崩溃循环、LimitNOFILE=65535 全局 fd 兜底、单进程前提。
+[Unit]
+Description=chill-relay blind relay
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=10
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=chillrelay
+Group=chillrelay
+WorkingDirectory=/opt/chill-relay
+# /etc/chill-relay/operator.env 权限 600，含 OPERATOR_KEY=... 及可选 TLS_KEY_PATH/TLS_CERT_PATH/DB_PATH/PORT
+EnvironmentFile=/etc/chill-relay/operator.env
+ExecStart=/usr/local/bin/node /opt/chill-relay/dist/src/server.js
+Restart=always
+RestartSec=2
+LimitNOFILE=65535
+# 加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/chill-relay
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,48 @@
+{
+  "name": "@assistant-ai/chill-relay",
+  "version": "0.0.2",
+  "description": "chill 盲中继：手机遥控的配对信箱中继服务（只见密文；自建部署，一条命令）",
+  "type": "module",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "bin": {
+    "chill-relay": "dist/src/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit && node --import tsx --test \"tests/**/*.test.ts\"",
+    "audit": "npm audit --audit-level=high",
+    "start": "node dist/src/cli.js",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.8.0",
+    "better-sqlite3": "^13.0.3",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "author": "assistant-ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/udumbara2/chill.git",
+    "directory": "chill-relay"
+  }
+}

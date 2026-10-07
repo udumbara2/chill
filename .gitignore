@@ -1,9 +1,38 @@
+# 容器仓公共忽略（四件套：chill / chill-guardian / chill-relay / chill-mobile）
+# 原则：构建产物与运行数据永不入仓；各子项目自有的 .gitignore 继续生效
+
 node_modules/
 dist/
-packages/dist/
-dist-electron/
-.preview-sessions/
 *.tsbuildinfo
-packages/electron/resources/
-build-log.txt
-build-cli-log.txt
+
+# 本地版本管理产物（fetch-source/switcher 的本地状态，随机器不同）
+.version.json
+m-current.json
+
+# chill-relay：真实部署参数与运行数据（gen-certs.sh 生成各自的证书）
+chill-relay/deploy.local.md
+chill-relay/certs/
+chill-relay/relay.db
+chill-relay/relay.db-shm
+chill-relay/relay.db-wal
+chill-relay/chill-relay.env
+
+# chill-mobile：构建残留（原生构建只在 ASCII 构建场进行）与本地配置
+chill-mobile/android/build/
+chill-mobile/android/.gradle/
+chill-mobile/android/.kotlin/
+chill-mobile/android/app/build/
+chill-mobile/local.properties
+chill-mobile/.bundle/
+
+# e2e / 运行残留
+qr.json
+.state
+.keystore.json
+
+# 日志
+*.log
+
+# �������/���Խű�������ʵ��ַ�����·��������������
+chill/packages/cli/scripts/diag-ws.ts
+chill/packages/cli/scripts/mkqr.ts

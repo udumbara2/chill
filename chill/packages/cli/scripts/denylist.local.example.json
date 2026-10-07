@@ -1,0 +1,5 @@
+[
+  { "name": "服务器IP", "pattern": "203\\.0\\.113\\.10" },
+  { "name": "中继域名", "pattern": "example-relay", "flags": "i" },
+  { "name": "旧令牌前缀", "pattern": "deadbeef" }
+]

@@ -1,0 +1,33 @@
+{
+  "name": "@assistant-ai/chill",
+  "version": "0.0.2",
+  "description": "AI 助手全档包：chill CLI 全功能 + Electron 桌面窗口（TUI 内 /ui 启动，含会话接力）",
+  "main": "dist/electron-main.js",
+  "bin": {
+    "chill": "bin/chill.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "@assistant-ai/chill-cli": "workspace:*",
+    "@assistant-ai/native-desktop": "workspace:*",
+    "electron": "^28.3.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "author": "assistant-ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/udumbara2/chill.git",
+    "directory": "packages/chill"
+  }
+}

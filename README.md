@@ -1,132 +1,72 @@
-# chill
+# chill — AI 助手全家桶（四件套源码仓）
 
-一个 AI 助手 = 一个会话引擎（ChatEngine）+ 两种壳。对话、Subagent 委派、MCP、Skill、长期记忆、规划模式，全部能力两端一致。
+一个 AI 助手 = 一个会话引擎（ChatEngine）+ 多个壳。本仓是全部源码的公开之家，含四个组件：
 
-## 两条独立安装路径
+| 目录 | 是什么 | 独立安装 |
+|---|---|---|
+| `chill/` | monorepo 本体：core（引擎）+ cli（终端壳）+ electron/ui/web（桌面与浏览器壳） | `npm install -g @assistant-ai/chill-cli`（轻档）/ `@assistant-ai/chill`（全档，含桌面窗口） |
+| `chill-relay/` | 盲中继服务：手机遥控的配对信箱（只见密文，端到端加密在两端完成） | `npm install -g @assistant-ai/chill-relay`（装你自己的服务器） |
+| `chill-guardian/` | 版本切换与自迭代守护工具（switcher / freeze / mobile-freeze / mobile-push） | 随 chill-cli 的 guardian/ 目录分发，无需单独安装 |
+| `chill-mobile/` | 手机 App（React Native，Android） | GitHub Releases 下载 APK |
 
-### 只装 CLI（终端）
-
-```bash
-npm install -g @assistant-ai/chill-cli
-chill
-```
-
-- 无需克隆仓库、无需桌面端；CLI 进程不加载任何 UI/Vue/Electron 代码
-- 对话、`task` 委派（含并行与按任务性质指定模型）、MCP、Skill、记忆、规划模式全部可用
-- 详见 [packages/cli/README.md](packages/cli/README.md)
-
-### 只装桌面 UI
-
-下载安装包安装即用（Windows nsis / mac dmg / Linux AppImage），安装包内不含 CLI，功能与 CLI 同等，另有可视化工作流与写作视图。
-
-### 两者都装（并存）
-
-CLI 与桌面 UI 各自独立安装运行，**共享同一份 `~/.chill/`**（API Key、模型配置、会话、记忆、Skill、MCP 配置）：
-
-- 一端建立的会话可在另一端继续（`~/.chill/sessions/`，跨端 watch 实时同步）
-- 会话前台选择（裸模型 / 本地 Agent）随会话持久化，跨端续聊保持一致
-
-## 基本使用
+## 三条安装命令 + 一个 APK
 
 ```bash
-chill                  # 交互式对话
-chill -p "任务"        # 非交互一次性执行（默认只读）
-chill -p --auto "任务"  # 非交互一次性执行（放开修改）
+npm install -g @assistant-ai/chill-cli     # 终端 + 浏览器全功能助手
+npm install -g @assistant-ai/chill         # 同上 + 独立桌面窗口（TUI 内 /ui 启动）
+npm install -g @assistant-ai/chill-relay   # 中继服务（部署到自己的 VPS；--init 向导）
 ```
 
-- `/help` 全部命令；`/model` 选模型；`/front` 选会话前台；`/plan` 规划模式；`/compact` 压缩上下文；`/session` 会话管理；`/tasks` 后台任务列表；`/add-dir` 扩展可写目录
-- `@` 是统一提及语法：`@<文件路径>` 提及文件（发送图片或视频，多模态模型）；`@<subagent_type>` 提及 agent（点名委派，见下节）；`Ctrl+X` 中断生成
-- 委派无需切换模式：模型经 `task` 工具直接委派 Subagent，可按任务性质指定模型，进度实时呈现
-
-## 写边界(圈内直接写,圈外当场审批)
-
-chill 的写权限模型是**路径级边界**:安全来自边界而非审批。
-
-- **圈内直接写**:默认只能直接写**边界目录**内的文件——边界 = 会话工作目录(CLI 启动目录 / 桌面 UI 写作视图打开的文件夹)+ `/add-dir` 加入的目录(本次会话有效)。圈内写不弹窗、直接落盘,前台对话与后台 subagent 一致
-- **圈外当场审批**:写边界外的路径时,该次写就地暂停并弹出审批(diff 预览 + 归属"后台任务 X 请求…/主对话请求…"),三个选择:`[y]` 只批准这一次、`[d]` 批准并把写目标所在目录加入本次会话、`[n]` 拒绝
-- **`/add-dir <路径>`**:把项目目录加入本次会话可写范围(在项目目录里启动 chill 则天然圈内);`/add-dir` 无参列出当前边界
-- **AI 知道圈在哪**:每轮注入当前可写范围,AI 会自觉落在圈内,写圈外前会提前说明
-- **autoApply 新语义**:off(默认)= 圈内直接写 + 圈外当场审批(对齐 Codex workspace-write);on = 任意路径直接写不问(仅建议信任场景/隔离环境)
-- **命令执行**:`execute_powershell` 维持 off=即时询问(带归属)/on=直通
-- **其他保护**:chill 自身源码树(workcopy 外)禁写不变;每次写自动留 `.backup-*` 备份兜底;升级前会话历史中的"已暂存操作"PENDING 占位为显示残留(功能无影响)
-
-## 上下文压缩（/compact）
-
-长会话后运行 `/compact`（可带引导语，如 `/compact 重点保留接口设计讨论`），把上下文压缩为「交接式要点总结 + 会话主题索引」，此后在当前 session 轻装续聊：
-
-- **历史不删除**：完整对话保留在会话记录里，界面照常滚动可见；压缩处显示标记条（TUI 按 `Ctrl+O` 查看总结全文，桌面 UI 为折叠卡片）
-- **模型看压缩视图**：此后发送的上下文 = 总结 + 最近 2 轮原文 + 新消息，token 占用骤降；总结含「时间段-主题索引」，助手需要细节时会自行调用 `recall_archived_context` 工具按主题或时间段取回原文
-- **多次压缩**：每次生成一条 checkpoint 追加到同一会话记录（不新增会话文件），新总结承接旧总结
-- **边界**：有后台任务在跑时拒绝压缩；撤销压缩 = 删除会话记录中对应 checkpoint；需两端（CLI/桌面 UI）同版本
-
-## 委派异步化(后台任务)
-
-委派默认**后台执行**:AI 派出任务后立即可以继续对话,不阻塞;同批任务全部完成后 AI 自动整合结果向你汇报。
-
-- **进度与查询**:任务开始/完成有轻提示;随时可问"现在有哪些任务在跑",或用 `/tasks` 命令列出运行中与近期任务
-- **取消**:让 AI 取消某个任务(cancel_task),Worker 进程会被真正销毁;`Ctrl+X` 只打断当前对话轮,不杀后台任务
-- **同批语义**:一次派多个任务时,等同批全部完成才合并汇报一次;不同批次互不等待;单个任务完成即报
-- **结果保真**:Subagent 的最终报告**完整回传**,平台不做摘要截断;单个结果超 400KB 时全文落盘 `~/.chill/task-results/`,回执带文件路径与预览,AI 需要细节时自行 read_file 取回。报告被输出配额(maxTokens)剪断时尾部带【警告】标记,可用 `override_parameters.max_tokens` 调大重派
-- **写入与审批**:后台任务写文件走与主会话相同的写边界——圈内直接落盘,圈外当场弹出审批(带归属)
-- **会话护栏**:有后台任务在跑时不能切换/新建会话(防止结果回流到错误的会话),完成或取消后即可
-- **`chill -p` 维持同步**:非交互模式行为不变(跑完才退出)
-- 边界:任务是进程内的,进程退出即终止(重启后历史里的"后台进行中"会标记为已中断);同一时刻多进程操作同一会话的后台任务为不支持场景
-
-## 自定义 Agent 模板
-
-写一个 Markdown 文件即可创建自己的 agent（Subagent 模板），保存即生效、无需重启：
-
-- **个人级** `~/.chill/agents/templates/*.md`：所有项目可用
-- **项目级** `<项目>/.agents/agents/*.md`：随 git 仓库共享，仅当前项目（从工作目录向上递归各级）生效；同名时 **项目级 > 个人级 > 内置**
-
-```markdown
----
-name: 安全审查员
-subagent_type: security-reviewer
-description: 只读安全审查,专查注入、越权、密钥泄露
-model: 某模型名        # 可选;不写则跟随当前会话模型
-tools: [read_file, grep]  # 可选;不写则委派时按任务分配
----
-你是一名安全工程师,只读不改。按严重级别输出发现,每条附文件与行号、修复建议。
-```
-
-- `name` 与 `subagent_type` 必填（`subagent_type` 规则：小写字母/数字/连字符）；`description` 决定委派时能否被正确选中，务必写清"什么时候该用它"
-- 委派时模型优先级：委派动态指定 > 模板 `model` > 当前会话模型
-- 与 AGENTS.md 的分工：常设约束（构建命令、代码风格、全员纪律）写 `AGENTS.md`；角色定义（专职能力、专用模型/工具）写模板
-- 生效时机：CLI 对两级目录均有文件监听，改动下轮对话生效；桌面 UI 个人级热生效，项目级在会话打开/切换工作目录时加载。运行中新建 `.agents/agents/` 目录需重启后生效
-- 项目级模板随仓库分发，引入他人模板前请留意内容（模板含工具授权与指令）
-
-### @ 提及 agent（直聊 / 委派双通道）
-
-`@<subagent_type>` 是 agent 的统一入口，按内容自动分意：
+手机 App 从 GitHub Releases 下载 APK 安装。装好后：
 
 ```
-@security-reviewer                  # 裸提及：切换为与该 agent 直接对话（前台直聊）
-@security-reviewer 审查一下最近的改动  # 带内容：点名委派（后台执行，完成自动汇报）
-@图.png @code-reviewer 审查这张图     # 文件提及与 agent 提及可同用
+chill → /key set <provider> <apiKey> → /model    # 30 秒上手
+chill web                                        # 浏览器完整界面
+chill serve on                                   # 7×24 常驻（定时任务 + 手机遥控后端）
+/desktop on                                      # AI 操控本机（仅 Windows x64）
+/pair config → 扫码                               # 手机遥控（需自建中继）
 ```
 
-- **裸提及 = 直聊**：只喊名字即切换前台——之后每句话直接由该 agent 应答（它的角色、模型、工具面），主模型不经手；切换瞬间完成，不发起模型调用。`/front off` 恢复裸模型，或裸 @另一个 agent 直接换聊；也可用 `/front` 命令或 UI 左下角前台选择器切换。远程模板只能委派，裸 @ 会提示
-- **带内容 = 委派**：把这条任务点名委派给该 agent（后台执行，见上节"委派异步化"）
-- **直聊时的模型**：模板写了 `model` 就用模板的（状态栏标注"模板指定"），没写跟随你当前选定的模型；直聊时模板 `tools` 白名单同样生效（只读模板直聊也只读）
-- 规则：**精确匹配**模板 `subagent_type` 才触发，不匹配按普通文本；一条消息有多个 @agent 时**取第一个**
-- TUI 与桌面 UI 输入 `@` 会弹出 agent 选择列表（含内置/个人/项目模板），点选自动补全
-- `chill -p` 非交互支持带内容委派，但默认只读档会拦截 `task`，需 `chill -p --auto`
-- 规划模式（/plan）下可委派**只读**任务（Subagent 只获得只读工具）；不可委派修改操作
+## 自迭代：AI 能改 AI 自己
 
-## 自迭代（修改 chill 自身）
+TUI 里一条命令开启（自动下载对版源码到 `~/.chill/workspace/`，无需 git）：
 
-CLI 内 `/fetch-source` 下载源码到 `~/.chill/workspace/` 并构建，随后可让 chill 修改自身源码
-（workcopy 内变更，`/switch-version` 切换、`/discard-version` 放弃；`/use-self` / `/use-npm` 双向切换）。
+```
+/fetch-source
+```
 
-## 开发（monorepo）
+拉下来的就是本仓四件套的同构布局——AI 既能改桌面端自己（`/switch-version` 切换生效），也能改手机端（内置技能 mobile-iterate：改码 → 快照固化 → 构建推送你自己的 APK）。详见 [chill/packages/cli/README.md](chill/packages/cli/README.md)。
+
+## 自建中继（手机遥控）
 
 ```bash
-pnpm install
-pnpm build          # core + 渲染层 + electron 主进程
-pnpm build:cli      # CLI esbuild 三入口 bundle
-pnpm electron:dev   # UI 开发模式
-pnpm electron:build # 打桌面安装包（dist-electron/）
+# 你的 VPS 上：
+npm install -g @assistant-ai/chill-relay
+chill-relay --init        # 向导：运营者密钥、systemd 单元、端口清单
+# 桌面端：
+chill → /pair config 填中继地址 → chill serve on → 手机扫码
 ```
 
-包结构：`packages/core`（唯一引擎与全部能力）、`packages/cli`（终端壳）、`packages/ui` + `packages/electron`（桌面壳）。
+在家（同一 WiFi）可零成本：中继直接跑在桌面本机（`chill-relay` 一条命令），手机连 `ws://192.168.x.x:8443`。
+
+**边界（如实）**：官方 APK 钉了官方 CA 指纹——自签证书的 wss 需要重编 APK（本仓 `chill-mobile/` 源码即可，替换 `res/raw/ca_crt.pem`）；plain ws 仅限家庭网络/可信内网，公网部署请配 TLS。
+
+## 开发
+
+```bash
+git clone https://github.com/udumbara2/chill.git
+cd chill/chill && pnpm install && pnpm build && pnpm build:cli
+```
+
+手机端构建需要 JDK 17 + Android SDK；Windows 用户名为中文时须配置纯 ASCII 构建场（如 `C:\dev\chill-mobile`）。各组件细节见各自目录的 README。
+
+## 如实边界清单
+
+1. 桌面控制（`/desktop on`）当前仅支持 Windows x64，其他平台明确提示不崩溃
+2. 官方 APK 与自编 APK 签名不同，互不覆盖升级（自编 = 你自己的分叉）
+3. 手机遥控默认无内置中继——零默认地址是安全设计，不是缺陷
+4. 中继是盲中继：服务端只见密文；但 `static/` 发布通道下的产物对运营者可见（分层凭据模型见 chill-relay/README.md）
+
+## 许可
+
+MIT

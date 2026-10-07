@@ -1,0 +1,8 @@
+target/
+node_modules/
+# 冒烟脚本（scripts/smoke-desktop.mjs）向包根写真实屏幕截图——结构性再生，禁入 git
+smoke-*.png
+# .node 原子轮换的退役残骸（历史机制遗留，含构建产物二进制）——禁入 git
+*.retired.tmp.*
+# napi-rs 文件系统事务的恢复状态文件（构建中断/清理失败时残留）——禁入 git
+.napi-rs-filesystem-transaction.swp

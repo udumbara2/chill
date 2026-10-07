@@ -1,0 +1,45 @@
+{
+  "name": "@assistant-ai/core",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b && node scripts/postbuild.cjs && pnpm build:cjs",
+    "build:cjs": "tsc -p tsconfig.cjs.json && node scripts/fix-cjs-importmeta.cjs && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({type:'commonjs'}))\"",
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "lint": "eslint src",
+    "test": "node --test --experimental-transform-types --import ./tests/helpers/registerTsImportHook.mjs \"tests/**/*.test.ts\"",
+    "test:knowledge-eval": "node --experimental-transform-types --import ./tests/helpers/registerTsImportHook.mjs tests/knowledge/eval/runEval.ts"
+  },
+  "dependencies": {
+    "@coze/api": "^1.3.9",
+    "@langchain/core": "^1.1.0",
+    "@langchain/langgraph": "^1.1.1",
+    "@modelcontextprotocol/sdk": "^1.23.0",
+    "@noble/hashes": "^1.8.0",
+    "gray-matter": "^4.0.3",
+    "js-yaml": "^4.1.0",
+    "jszip": "^3.10.1",
+    "openai": "^4.20.1",
+    "pdfjs-dist": "^6.2.108",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.19.41",
+    "eslint": "^10.3.0",
+    "eslint-plugin-erasable-syntax-only": "^0.7.1",
+    "rimraf": "^5.0.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.59.3"
+  }
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.db
+*.db-shm
+*.db-wal
+certs/
+demo/.state/
+demo/qr.json
+*.log
+deploy.local.md

@@ -1,0 +1,71 @@
+{
+  "name": "@assistant-ai/chill-cli",
+  "version": "0.0.2",
+  "description": "chill — 终端 AI 助手（统一对话引擎、Subagent 委派、MCP、Skill、长期记忆、规划模式）",
+  "type": "module",
+  "bin": {
+    "chill": "dist/bootstrap.js"
+  },
+  "files": [
+    "dist",
+    "guardian",
+    "README.md"
+  ],
+  "keywords": [
+    "ai",
+    "cli",
+    "assistant",
+    "llm",
+    "agent",
+    "subagent",
+    "mcp"
+  ],
+  "license": "MIT",
+  "author": "udumbara2 <udumbara2@live.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/udumbara2/chill.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/udumbara2/chill/issues"
+  },
+  "homepage": "https://github.com/udumbara2/chill#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && pnpm --filter @assistant-ai/core build && tsc --noEmit -p tsconfig.json && node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "start": "node dist/cli.js",
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "prepack": "pnpm run build && node ../native-desktop/scripts/verify-native.mjs --require dist",
+    "prepublishOnly": "node scripts/verify-pack.mjs ."
+  },
+  "dependencies": {
+    "@assistant-ai/native-desktop": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@assistant-ai/core": "workspace:*",
+    "@types/hast": "^3.0.4",
+    "@types/node": "^20.5.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/qrcode-terminal": "^0.12.2",
+    "@types/react": "^19.0.0",
+    "@types/ws": "^8.18.0",
+    "esbuild": "^0.25.0",
+    "highlight.js": "^11.11.1",
+    "ink": "^6.7.0",
+    "lowlight": "^3.3.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "react": "^19.0.0",
+    "rimraf": "^5.0.0",
+    "typescript": "~5.9.3",
+    "ws": "^8.18.0"
+  }
+}

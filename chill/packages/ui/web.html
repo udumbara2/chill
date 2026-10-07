@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>chill · Web</title>
+    <style>
+      /* 连接屏（宿主 API 安装完成前唯一可见内容；main.ts 接管后由 Vue 应用取代） */
+      html, body { margin: 0; height: 100%; }
+      #web-boot {
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 14px;
+        font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        background: #f8fafc; color: #1e293b; font-size: 14px; z-index: 9999;
+      }
+      #web-boot .ring {
+        width: 34px; height: 34px; border-radius: 50%;
+        border: 3px solid #e2e8f0; border-top-color: #2563eb;
+        animation: bootspin 0.9s linear infinite;
+      }
+      #web-boot.error .ring { animation: none; border-top-color: #dc2626; }
+      @keyframes bootspin { to { transform: rotate(360deg); } }
+      #web-boot .hint { color: #94a3b8; font-size: 12px; }
+
+      /* M5.3 窄窗响应式（壳层 CSS——不动共享渲染层组件；对应桌面 UI 已有的窄窗行为） */
+      @media (max-width: 768px) {
+        /* 侧栏（WorkspacePanel）收窄隐藏；主聊天区全宽 */
+        .chat-layout-container > :first-child { display: none !important; }
+        /* 执行过程面板全宽覆盖 */
+        .agent-process-panel { width: 100vw !important; }
+        /* 设置页左侧 Tab 栏收窄为图标 */
+        .settings-tabs-sidebar { width: 52px !important; }
+        .settings-tabs-sidebar .tab-label { display: none !important; }
+        /* 药丸行允许换行 */
+        .footer-pill-row { flex-wrap: wrap; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="web-boot"><div class="ring"></div><div class="msg">正在连接本地 daemon…</div><div class="hint">chill web · WebUI 规划 M1.4</div></div>
+    <script>document.body.setAttribute('data-probe', 'inline-ok')</script>
+    <div id="app"></div>
+    <script type="module" src="/src/webEntry.ts"></script>
+  </body>
+</html>

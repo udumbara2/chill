@@ -1,0 +1,26 @@
+{
+  "name": "@assistant-ai/web",
+  "version": "0.0.1",
+  "private": true,
+  "description": "chill Web 宿主（daemon）：静态服务 + HostAPI over WS + 能力执行（WebUI 规划 M1）",
+  "type": "module",
+  "bin": {
+    "chill-web": "dist/serve.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "start": "node dist/serve.js",
+    "test": "node --test --test-concurrency=1 --experimental-transform-types --import ../core/tests/helpers/registerTsImportHook.mjs \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@assistant-ai/core": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.41",
+    "@types/ws": "^8.18.0",
+    "esbuild": "^0.25.0",
+    "typescript": "~5.9.3"
+  }
+}
