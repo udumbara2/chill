@@ -1,6 +1,6 @@
 {
   "name": "@assistant-ai/chill-cli",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "chill — 终端 AI 助手（统一对话引擎、Subagent 委派、MCP、Skill、长期记忆、规划模式）",
   "type": "module",
   "bin": {

@@ -1,6 +1,6 @@
 {
   "name": "@assistant-ai/native-desktop",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "AI 助手桌面原语：截屏 + 键鼠注入（napi-rs，Windows 先行）",
   "main": "index.js",
   "types": "index.d.ts",

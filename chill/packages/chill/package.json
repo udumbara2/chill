@@ -1,6 +1,6 @@
 {
   "name": "@assistant-ai/chill",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "AI 助手全档包：chill CLI 全功能 + Electron 桌面窗口（TUI 内 /ui 启动，含会话接力）",
   "main": "dist/electron-main.js",
   "bin": {
@@ -18,7 +18,7 @@
   "dependencies": {
     "@assistant-ai/chill-cli": "workspace:*",
     "@assistant-ai/native-desktop": "workspace:*",
-    "electron": "^28.3.3"
+    "@assistant-ai/electron-win32-x64": "workspace:*"
   },
   "publishConfig": {
     "access": "public"

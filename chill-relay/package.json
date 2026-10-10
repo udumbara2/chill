@@ -1,6 +1,6 @@
 {
   "name": "@assistant-ai/chill-relay",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "chill 盲中继：手机遥控的配对信箱中继服务（只见密文；自建部署，一条命令）",
   "type": "module",
   "engines": {

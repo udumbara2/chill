@@ -1,0 +1,22 @@
+{
+  "name": "@assistant-ai/electron-win32-x64",
+  "version": "28.3.3",
+  "description": "Electron 28.3.3 prebuilt runtime (win32-x64), distributed via npm registry - zero compile, zero GitHub at install time",
+  "private": true,
+  "files": [
+    "dist",
+    "cli.js",
+    "LICENSE",
+    "LICENSES.chromium.html",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "author": "assistant-ai",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs"
+  }
+}

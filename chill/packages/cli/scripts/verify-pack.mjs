@@ -17,12 +17,13 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = process.argv[2] ?? '.';
-// files 白名单不变量（按包名注册制：四包齐发各守各的白名单，未知包拒绝扫描）
+// files 白名单不变量（按包名注册制：各包各守各的白名单，未知包拒绝扫描）
 const EXPECTED_FILES_BY_PKG = {
   '@assistant-ai/chill-cli': ['dist', 'guardian', 'README.md'],
   '@assistant-ai/chill': ['bin', 'dist', 'README.md'],
   '@assistant-ai/chill-relay': ['dist', 'README.md'],
   '@assistant-ai/native-desktop': ['index.js', 'index.d.ts', '*.node'],
+  '@assistant-ai/electron-win32-x64': ['dist', 'cli.js', 'LICENSE', 'LICENSES.chromium.html', 'README.md'],
 };
 
 // 本机用户路径模式：运行时从 homedir() 派生（反斜杠与正斜杠双形态），

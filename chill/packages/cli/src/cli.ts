@@ -2456,7 +2456,10 @@ function findChillShellPackage(): { root: string; electronCli: string | null } |
       pkgName = String(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).name ?? '')
     } catch { continue }
     if (pkgName !== '@assistant-ai/chill') continue
+    // 候选：0.0.3+ 自有运行时包（registry 分发，安装链路零 GitHub）→ 0.0.2 官方 electron（升级兼容）
     const electronCli = [
+      join(root, 'node_modules', '@assistant-ai', 'electron-win32-x64', 'cli.js'),
+      join(root, '..', '..', '@assistant-ai', 'electron-win32-x64', 'cli.js'),
       join(root, 'node_modules', 'electron', 'cli.js'),
       join(root, '..', '..', 'electron', 'cli.js'),
     ].find((p) => existsSync(p)) ?? null

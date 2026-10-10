@@ -24,7 +24,7 @@
  * Gitee 补齐 tag 后国内用户自动恢复快速源）。默认双仓全查。
  * 禁止绕过本脚本在任何目录手动 npm publish。
  */
-import { mkdtempSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,13 +41,25 @@ const ref = args.includes('--ref') ? args[args.indexOf('--ref') + 1] : 'master';
 const dryRun = args.includes('--dry-run');
 const githubOnly = args.includes('--github-only');
 const otp = args.includes('--otp') ? args[args.indexOf('--otp') + 1] : null;
+// 现场供码（方案 B）：发布时刻轮询等待 OTP 文件出现——TOTP 鲜码即写即用即删
+const otpFile = args.includes('--otp-file') ? args[args.indexOf('--otp-file') + 1] : null;
 
-function run(cmd, cmdArgs, cwd, label) {
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function run(cmd, cmdArgs, cwd, label, retries = 1) {
   console.log(`\n=== ${label} ===`);
-  const r = spawnSync(cmd, cmdArgs, { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
-  if (r.status !== 0) {
-    console.error(`❌ ${label} 失败（退出码 ${r.status}）`);
-    process.exit(1);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const r = spawnSync(cmd, cmdArgs, { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
+    if (r.status === 0) return;
+    if (attempt < retries) {
+      console.log(`⚠️ ${label} 失败（退出码 ${r.status}，第 ${attempt}/${retries} 次）——30 秒后重试`);
+      sleepSync(30000);
+    } else {
+      console.error(`❌ ${label} 失败（退出码 ${r.status}，已试 ${retries} 次）`);
+      process.exit(1);
+    }
   }
 }
 
@@ -88,17 +100,46 @@ function verifySourceTag(version, headSha) {
 }
 
 function publish(pkgDir, label) {
-  const publishArgs = ['publish', '--access', 'public', '--no-git-checks'];
-  if (dryRun) publishArgs.push('--dry-run');
-  if (otp) publishArgs.push('--otp', otp);
-  run('pnpm', publishArgs, pkgDir, label);
+  // Stage 模式（npm 2026 新政：直接 CLI 发布要求交互式 2FA——WebAuthn 账号在命令行无法完成；
+  // 官方路径 = pnpm pack（workspace:* 改写 + prepack 门）→ npm stage publish（免 2FA 上传暂存区）
+  // → 网页 Staged Packages 页 Windows Hello 审批上线）
+  const pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf-8'));
+  const tgzName = `${pkg.name.replace('@', '').replace('/', '-')}-${pkg.version}.tgz`;
+  const tgzPath = join(pkgDir, tgzName);
+  if (dryRun) {
+    run('pnpm', ['pack'], pkgDir, `${label}（dry-run：仅打包）`, 2);
+    return;
+  }
+  run('pnpm', ['pack'], pkgDir, `${label}：pnpm pack（workspace 依赖改写 + prepack 门）`, 2);
+  if (!existsSync(tgzPath)) {
+    console.error(`❌ ${label}：未找到打包产物 ${tgzPath}`);
+    process.exit(1);
+  }
+  run('npm', ['stage', 'publish', tgzPath], pkgDir, `${label}：npm stage publish → 暂存区（审批走网页 Windows Hello）`, 4);
+}
+
+/** 工作区清理：rmSync 在 Windows 深层 node_modules（>260 字符路径）下静默失败——
+ * 今晚实测 6 个工作区共 6.9GB 泄漏。robocopy /MIR 空目录镜像清空（内部用 \\?\ 长路径），
+ * 随后 rmSync 收尾删除已清空的骨架。 */
+function robustRemove(p) {
+  try {
+    if (process.platform === 'win32') {
+      const empty = `${p}.empty`;
+      mkdirSync(empty, { recursive: true });
+      spawnSync('robocopy', [empty, p, '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'], { stdio: 'ignore' });
+      rmSync(empty, { recursive: true, force: true });
+    }
+    rmSync(p, { recursive: true, force: true });
+  } catch (e) {
+    console.error(`⚠️ 工作区清理不完全（${e.message}）：${p}——请手动删除`);
+  }
 }
 
 const work = mkdtempSync(join(tmpdir(), 'chill-release-'));
 console.log(`隐士发布工作区：${work}（ref=${ref}${dryRun ? '，dry-run' : ''}${githubOnly ? '，github-only' : ''}）`);
 
 try {
-  run('git', ['clone', '--depth', '1', '--branch', ref, REPO, 'repo'], work, '1/8 干净克隆');
+  run('git', ['clone', '--depth', '1', '--branch', ref, REPO, 'repo'], work, '1/8 干净克隆', 4);
   const repoRoot = join(work, 'repo');
   const mono = join(repoRoot, 'chill');
   const relayDir = join(repoRoot, 'chill-relay');
@@ -124,7 +165,8 @@ try {
   const headSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf-8' }).stdout.trim();
   verifySourceTag(version, headSha);
 
-  // 版本一致性闸：四包同版本（依赖拓扑 ①→②→④ 与 tag 归档版本必须一票对齐）
+  // 版本一致性闸：四包同版本（依赖拓扑 ①→②→④ 与 tag 归档版本必须一票对齐）；
+  // electron-runtime 例外——版本号与 Electron 引擎对齐（28.x），不跟产品版本线
   console.log(`\n=== 4/8 版本一致性闸（期望 ${version}） ===`);
   const versionProbes = [
     ['packages/native-desktop', join(mono, 'packages', 'native-desktop', 'package.json')],
@@ -138,6 +180,8 @@ try {
       process.exit(1);
     }
   }
+  const rtVer = JSON.parse(readFileSync(join(mono, 'packages', 'electron-runtime', 'package.json'), 'utf-8')).version;
+  console.log(`版本一致：native-desktop / chill-cli / chill-relay / chill 均 ${version}；electron-runtime ${rtVer}（引擎版本线）`);
   console.log('版本一致：native-desktop / chill-cli / chill-relay / chill 均 ' + version);
 
   // 本地版本管理产物不得随源码分发（.gitignore 已列，须上游解除追踪；内容含迭代元数据，属无扫描通道）
@@ -170,14 +214,16 @@ try {
   run('node', ['scripts/verify-pack.mjs', '.'], cliDir, '7/8 泄露扫描闸（chill-cli）');
   run('node', ['scripts/verify-pack.mjs', join(mono, 'packages', 'chill')], cliDir, '7/8 泄露扫描闸（壳包）');
   run('node', ['scripts/verify-pack.mjs', relayDir], cliDir, '7/8 泄露扫描闸（chill-relay）');
+  // electron-runtime 零源码（纯二进制+官方 LICENSE），denylist 扫描不可行——靠白名单断言 + 构建断言
 
   // 发布（依赖拓扑序；prepack 各自把门：cli=verify-native --require dist，shell=装配断言）
   publish(join(mono, 'packages', 'native-desktop'), `8/8 发布 ① @assistant-ai/native-desktop@${version}`);
   publish(cliDir, `8/8 发布 ② @assistant-ai/chill-cli@${version}`);
   publish(relayDir, `8/8 发布 ③ @assistant-ai/chill-relay@${version}`);
-  publish(join(mono, 'packages', 'chill'), `8/8 发布 ④ @assistant-ai/chill@${version}`);
+  publish(join(mono, 'packages', 'electron-runtime'), '8/8 发布 ④ @assistant-ai/electron-win32-x64（引擎版本线）');
+  publish(join(mono, 'packages', 'chill'), `8/8 发布 ⑤ @assistant-ai/chill@${version}`);
 
   console.log('\n✅ 隐士发布完成（四包齐发）');
 } finally {
-  rmSync(work, { recursive: true, force: true });
+  robustRemove(work);
 }
