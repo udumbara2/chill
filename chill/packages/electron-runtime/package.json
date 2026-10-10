@@ -2,7 +2,6 @@
   "name": "@assistant-ai/electron-win32-x64",
   "version": "28.3.3",
   "description": "Electron 28.3.3 prebuilt runtime (win32-x64), distributed via npm registry - zero compile, zero GitHub at install time",
-  "private": true,
   "files": [
     "dist",
     "cli.js",
