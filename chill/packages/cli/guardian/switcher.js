@@ -376,7 +376,7 @@ function launchNewCli() {
   succeed({ launched: true, pid: child.pid });
 }
 
-/** M3.2（版本切换接续规划）：Electron 窗启动——/ui 形态 1 同款 spawn 链
+/** M3.2（版本切换接续规划）：Electron 窗启动——/desktop 形态 1 同款 spawn 链
  *  （node electron-cli <root>；cwd=root、NODE_ENV=production）。
  *  root=workcopyPath（--preview 体验验收窗，体验识别走目录探测与 M2.1 同源）或
  *  projectPath（--launch junction 演示窗——路径在 spawn 时刻解析，必穿当前 junction）。 */

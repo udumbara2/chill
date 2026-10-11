@@ -92,7 +92,7 @@ const STARTUP_TIPS = [
   '输入 /r <版本前缀> 快速回滚，/delete-version <版本> 清理旧版本',
 
   // --- 显示切换 ---
-  '输入 /ui 启动桌面 UI 模式，/tui 切换到终端富文本显示',
+  '输入 /desktop 打开桌面窗口（接力当前会话），/tui 切换到终端富文本显示',
   '按 Ctrl+X 中断当前生成，Ctrl+V 粘贴剪贴板内容',
 
   // --- 文件操作 ---
@@ -115,11 +115,24 @@ let forceCli = false
 let serveMode = false
 {
   const argv = process.argv.slice(2)
-  const usage = '用法: chill [-p|--print] [--auto] [--cli] <任务>\n  -p, --print  非交互一次性执行（默认只读，--auto 放开修改）\n  --cli        强制 CLI 显示（默认 TUI 显示）\n  --serve      无界面常驻宿主（手机遥控后端）\n  serve        常驻宿主控制面：chill serve on|off|status\n  web          启动 Web UI（浏览器打开终端打印的地址）'
+  const usage = '用法: chill [-p|--print] [--auto] [--cli] <任务>\n  -p, --print  非交互一次性执行（默认只读，--auto 放开修改）\n  --cli        强制 CLI 显示（默认 TUI 显示）\n  --serve      无界面常驻宿主（手机遥控后端）\n  serve        常驻宿主控制面：chill serve on|off|status\n  web          启动 Web UI（浏览器打开终端打印的地址）\n  desktop      直启桌面窗口（Electron；全档包，自动接力最近会话）'
   // D14 控制面首词门控：极早分流（先于 CliContext/引擎构造，毫秒级）——runServeControl 自带退出
   if (argv[0] === 'serve') {
     runServeControl(argv.slice(1))
     process.exit(0)
+  }
+  // chill desktop：直启桌面窗口（与 /desktop 同一启动核心；照 serve 先例极早分流——
+  // 直启无需 CliContext/引擎。handoff 不注入 env=UI 回退最近会话，正是直启想要的语义）。
+  if (argv[0] === 'desktop') {
+    if (argv.length > 1) {
+      process.stderr.write(`desktop 不接受额外参数\n${usage}\n`)
+      process.exit(2)
+    }
+    const launch = launchDesktopWindow({ handoffSessionId: null, print: (t) => process.stdout.write(t) })
+    if (launch === null) process.exit(1)
+    // await 观察期真话后退出：既阻断主流程（CliContext/REPL 不装配），又保住退出码语义
+    const ok = await launch
+    process.exit(ok ? 0 : 1)
   }
   for (const arg of argv) {
     if (arg === '-p' || arg === '--print') {
@@ -606,12 +619,17 @@ const relayClient = new CliRelayClient({
   patchSessionTitle: (id, title) => sessionService.patchTitleRecord(id, title),
   deleteSessionRecord: (id) => sessionService.deleteRecord(id),
   // 宿主级开关执行面（desktop.set/autoswitch.set；单一事实点在 core desktopControl）：store 与 CLI 本地
-  // /desktop 同键同源；engine 由命令面执行器从活动引擎现取（serve 多引擎惰性活性）；探测与放行收回经 ctx
+  // /computer 同键同源；engine 由命令面执行器从活动引擎现取（serve 多引擎惰性活性）；探测与放行收回经 ctx
   desktopControlPort: {
     store: ctx.keyValueStore,
     desktop: ctx.desktopController,
     sessionAllow: ctx.builtInExecutor,
-  },})
+  },
+  // relay 日志必须走 notify 通道，严禁回落 relayClient 的裸写缺省（process.stdout.write 直插 TTY）：
+  // TUI 空闲期的连接/重连事件若裸写，文本落在光标所在行（叠进状态行）、\n 再推走光标 →
+  // Ink 增量账本整体错位 = 重影/叠行实测根因（2026-10-12 截图实锤"已连接中继"叠进状态行）。
+  // notify 三态语义正确覆盖：TUI=消息区 notice / -p=stderr / CLI=stdout（与旧输出逐字节同形）
+  log: (m) => notify(`[relay] ${m}\n`),})
 // M1：serve 的 active.changed 直推（serveSessions.setActive → 桥；不装 wireActiveSession 的补偿通道）
 serveSessions?.onActiveChanged((sid) => relayClient.pushActiveChanged(sid))
 relayClientRef.current = relayClient
@@ -1087,7 +1105,7 @@ function reprompt(): void {
 }
 
 // ===== CLI↔UI 会话同步（watch 租赁制 + 发送前锚定） =====
-// 仅 /ui 租赁存活期间启用 watch，UI 未开启时与现状一致（无 watch、无通知）；
+// 仅 /desktop 租赁存活期间启用 watch，UI 未开启时与现状一致（无 watch、无通知）；
 // preview 模式整体不启用（CliSessionService 的 watch/loadIfNewer 已内部拦截）
 let uiLeaseCount = 0
 /** 当前被 watch 的会话 id（无 watch 活动时为 null） */
@@ -1156,7 +1174,7 @@ async function flushPeerSync(): Promise<void> {
 
 /** 让 watch 跟随当前会话 id：外部写入者存在时启用；id 变化时重挂，id 为 null 时停 watch */
 function followWatch(id: string | null): void {
-  // D13：启用条件放宽为"存在外部写入者"——UI 租赁（/ui 拉起的 electron 存活）∥ relay 可用
+  // D13：启用条件放宽为"存在外部写入者"——UI 租赁（/desktop 拉起的 electron 存活）∥ relay 可用
   //（serve/他端壳持约时其写入须实时镜像到本端屏幕；回声过滤使无外部写入时零成本）
   if ((uiLeaseCount === 0 && !relaySyncPossible) || sessionService.isPreview) return
   if (id === watchedSessionId) return
@@ -1187,7 +1205,7 @@ function showHelp(): void {
   process.stdout.write('  /help      显示帮助\n')
   process.stdout.write('  chill web    启动 Web UI（自动打开浏览器；--no-open 可禁用，与桌面 UI 同一份代码）\n')
   process.stdout.write('  /skill     安装/卸载/更新/导出 Skill，或查看/启用/禁用\n')
-  process.stdout.write('  /desktop   桌面能力开关（截屏 + 键鼠操作；/desktop on 开启，建议搭配视觉模型）\n')
+  process.stdout.write('  /computer  桌面操控开关（截屏 + 键鼠操作，即 computer use；/computer on 开启，建议搭配视觉模型）\n')
   process.stdout.write('  /tools     工具渐进发现开关与状态（/tools mode on|off 开关；/tools status 查看分布）\n')
   process.stdout.write('  /mcp       进入 MCP 管理模式\n')
   process.stdout.write('  /workflow  进入 Workflow 管理模式\n')
@@ -1223,7 +1241,8 @@ function showHelp(): void {
   process.stdout.write('  /hooks     生命周期钩子管理（list/enable/disable/log；/hooks add <描述> 自然语言创建）\n')
   process.stdout.write('  /schedule  定时任务管理（list/cancel；创建直接对话说明，如"每天早上 9 点汇总 git 进展"）\n')
   process.stdout.write('  /init      生成项目 AGENTS.md 约束初稿\n')
-  process.stdout.write('  /ui        启动 UI 模式（Electron）\n')
+  process.stdout.write('  /desktop   打开桌面窗口（Electron，接力当前会话；轻档包给出升级指引）\n')
+  process.stdout.write('  /web       启动 Web UI（后台常驻，浏览器自动打开，打印带 token 地址）\n')
   process.stdout.write('  /tui       切换到 TUI 显示（默认入口；/cli 退回）\n')
   process.stdout.write('  /cli       切换到 CLI 显示（当前模式）\n')
   process.stdout.write('  /exit      退出\n')
@@ -1876,8 +1895,8 @@ async function handleLine(input: string): Promise<void> {
     return
   }
 
-  if (input === '/desktop' || input === '/desktop on' || input === '/desktop off' || input === '/desktop log' || input.startsWith('/desktop audit')) {
-    await handleDesktop(input)
+  if (input === '/computer' || input === '/computer on' || input === '/computer off' || input === '/computer log' || input.startsWith('/computer audit')) {
+    await handleComputer(input)
     return
   }
 
@@ -1900,8 +1919,13 @@ async function handleLine(input: string): Promise<void> {
     return
   }
 
-  if (input === '/ui') {
-    handleUI()
+  if (input === '/desktop') {
+    handleDesktopWindow()
+    return
+  }
+
+  if (input === '/web') {
+    handleWebUi()
     return
   }
 
@@ -2353,59 +2377,65 @@ async function handleCompact(input: string): Promise<void> {
   process.stdout.write('原对话全部保留；TUI 中压缩处显示标记条，Ctrl+O 查看总结全文。\n')
 }
 
-function handleUI(): void {
+/** 桌面窗口启动核心（REPL /desktop 与 chill desktop 直启共用）：形态探测 → 直拉 electron.exe → 观察期真话。
+ * - handoff 三值：null=不注入 env（直启语义——UI 回退最近会话）；''=接力但 CLI 无落盘会话（UI 开新会话）；'<id>'=接力该会话
+ * - print 输出路由注入：REPL 传 notify（观察期消息晚于命令返回，TUI 必须经 presentPrint）；直启传 stdout
+ * - onSpawn：REPL 挂 watch 租赁（直启无 CLI 会话可看，不挂）
+ * 返回 null=前置检查失败（原因已 print）；否则 Promise<boolean>=观察期结论（true=窗口存活过阈值） */
+function launchDesktopWindow(opts: {
+  handoffSessionId: string | null
+  print: (text: string) => void
+  onSpawn?: (child: ReturnType<typeof spawn>) => void
+}): Promise<boolean> | null {
   let spawnCommand: string
   let spawnArgs: string[]
   let spawnCwd: string | undefined
 
   if (projectPaths.projectPath !== null) {
-    // 形态 1：managed 布局（源码工作区）——从 packages/electron 启动
+    // 形态 1：managed 布局（源码工作区）——直拉官方 electron 包内的 exe
+    // （不经 cli.js 引导：少一层 node 中间人，也没有对包内 index.js 的隐式依赖）
     const rootDir = projectPaths.projectPath
     const electronMain = join(rootDir, 'packages', 'electron', 'dist', 'electron-main.js')
 
     if (!existsSync(electronMain)) {
-      process.stdout.write('UI 模块未构建。请先执行 pnpm run build\n')
-      return
+      opts.print('UI 模块未构建。请先执行 pnpm run build\n')
+      return null
     }
 
-    const electronCli = join(rootDir, 'packages', 'electron', 'node_modules', 'electron', 'cli.js')
+    const electronExe = join(rootDir, 'packages', 'electron', 'node_modules', 'electron', 'dist', 'electron.exe')
 
-    if (!existsSync(electronCli)) {
-      process.stdout.write('未找到 Electron 启动脚本。请先执行 pnpm install\n')
-      return
+    if (!existsSync(electronExe)) {
+      opts.print('未找到 Electron 运行时（electron.exe）。请先执行 pnpm install\n')
+      return null
     }
 
-    spawnCommand = process.execPath
-    spawnArgs = [electronCli, rootDir]
+    spawnCommand = electronExe
+    spawnArgs = [rootDir]
     spawnCwd = rootDir
   } else {
     // 形态 2：npm 全档（@assistant-ai/chill 壳包自带 electron）——探测壳包并 spawn 其主进程
     const shell = findChillShellPackage()
     if (!shell) {
-      process.stdout.write(
+      opts.print(
         '当前为轻档包（@assistant-ai/chill-cli），不含桌面 UI。\n' +
         '需要独立桌面窗口：npm install -g @assistant-ai/chill（全档，含 Electron 运行时）\n' +
         '浏览器完整界面现在就可用：chill web\n'
       )
-      return
+      return null
     }
-    if (!shell.electronCli) {
-      process.stdout.write(
+    if (!shell.electronExe) {
+      opts.print(
         '已安装全档包，但 Electron 运行时缺失（安装期下载可能失败）。\n' +
         '国内网络先设置：ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/\n' +
         '然后重装：npm uninstall -g @assistant-ai/chill && npm install -g @assistant-ai/chill\n'
       )
-      return
+      return null
     }
-    spawnCommand = process.execPath
-    spawnArgs = [shell.electronCli, shell.root]
+    spawnCommand = shell.electronExe
+    spawnArgs = [shell.root]
   }
 
   try {
-    // handoff：CLI 当前会话 id 经 env 传给 UI。三值契约：'<id>'=接力该会话；
-    // ''=接力但 CLI 尚无落盘会话（UI 应开全新空会话，而非回退历史最新）；
-    // 未注入（undefined→读取侧 null）=非 /ui 启动（UI 自行回退最近会话）
-    const handoffSessionId = chatService.getSessionId()
     const child = spawn(spawnCommand, spawnArgs, {
       cwd: spawnCwd,
       stdio: 'ignore',
@@ -2413,39 +2443,125 @@ function handleUI(): void {
       env: {
         ...process.env,
         NODE_ENV: 'production',
-        CHILL_SESSION_ID: handoffSessionId ?? '',
+        ...(opts.handoffSessionId !== null ? { CHILL_SESSION_ID: opts.handoffSessionId } : {}),
       },
     })
     child.unref()
-    // watch 租赁：UI 存活期间监听当前会话的外部变更；electron 关窗即 app.quit → 进程 exit 回收租赁。
-    // 多次 /ui 引用计数，全部退出才 unwatch；preview 模式下 followWatch 为空操作
-    uiLeaseCount++
-    followWatch(chatService.getSessionId())
-    let leaseReleased = false
-    const releaseLease = () => {
-      if (leaseReleased) return
-      leaseReleased = true
-      uiLeaseCount = Math.max(0, uiLeaseCount - 1)
-      if (uiLeaseCount === 0) {
-        sessionService.unwatch()
-        watchedSessionId = null
+    opts.onSpawn?.(child)
+    // 启动观察期：spawn 同步成功 ≠ 窗口能活（2026-10-10 全档包事故：stdio ignore 吞掉子进程
+    // 闪崩、照打「已启动」误导用户）。观察期内退出 = 当场报真话；存活过阈值才宣布已启动。
+    opts.print('正在启动桌面窗口…\n')
+    let uiSettled = false
+    const settleUi = (ok: boolean, code: number | null): boolean => {
+      if (uiSettled) return ok
+      uiSettled = true
+      if (ok) {
+        opts.print('桌面窗口已启动\n')
+      } else {
+        opts.print(`桌面窗口启动失败：窗口进程随即退出（退出码 ${code ?? '?'}）。\n可手动运行 "${spawnCommand}" 查看报错。\n`)
       }
+      return ok
     }
-    child.on('exit', releaseLease)
-    child.on('error', releaseLease)
-    process.stdout.write('UI 模式已启动\n')
+    return new Promise<boolean>((resolve) => {
+      const grace = setTimeout(() => resolve(settleUi(true, null)), 5000)
+      grace.unref?.()
+      child.on('exit', (code) => {
+        clearTimeout(grace)
+        resolve(settleUi(false, code))
+      })
+    })
   } catch (err: any) {
-    process.stdout.write(`启动 UI 模式失败: ${err?.message || err}\n`)
+    opts.print(`启动桌面窗口失败: ${err?.message || err}\n`)
+    return null
   }
+}
+
+/** /web：就地启动 Web UI daemon（detached 后台常驻）并捕获带 token 的访问地址。
+ * 不传 --quiet（会连 URL 打印一起吞掉）；不传 --no-open（浏览器由 daemon 自行打开）。
+ * URL 到手后 stdout/stderr 转入静默排水（续读丢弃——防背压防 EPIPE，daemon 后续日志不进终端画面）。 */
+function handleWebUi(): void {
+  const serveJs = join(dirname(fileURLToPath(import.meta.url)), 'web', 'serve.js')
+  if (!existsSync(serveJs)) {
+    notify('✗ Web UI 不可用：web daemon 未构建（dist/web/serve.js 缺失）。\n')
+    return
+  }
+  notify('正在启动 Web UI…\n')
+  let child: ReturnType<typeof spawn>
+  try {
+    child = spawn(process.execPath, [serveJs], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (err: any) {
+    notify(`Web UI 启动失败: ${err?.message || err}\n`)
+    return
+  }
+  child.unref()
+  let settled = false
+  let urlBuf = ''
+  let errBuf = ''
+  const settle = (ok: boolean, detail?: string): void => {
+    if (settled) return
+    settled = true
+    if (!ok) {
+      notify(`Web UI 启动失败${detail ? '：' + detail : ''}。\n可运行 chill web 前台启动查看完整报错。\n`)
+    }
+  }
+  child.stdout!.on('data', (d: Buffer) => {
+    if (settled) return // 排水：URL 到手后静默丢弃 daemon 后续输出
+    urlBuf += d.toString('utf8')
+    const m = /➜\s+(http:\/\/\S+)/.exec(urlBuf)
+    if (m) {
+      settled = true
+      notify(`Web UI 已启动\n  ➜  ${m[1]}\n  （浏览器即将自动打开；daemon 后台常驻）\n`)
+    }
+  })
+  child.stderr!.on('data', (d: Buffer) => {
+    if (settled) return
+    errBuf += d.toString('utf8')
+  })
+  child.on('exit', (code) => {
+    const errLine = /Error[^\n]*/.exec(errBuf)?.[0] ?? (errBuf.trim() !== '' ? errBuf.trim().split('\n').pop() : '')
+    const lastErr = errLine !== '' ? `；${errLine}` : ''
+    settle(false, code != null ? `daemon 进程随即退出（退出码 ${code}）${lastErr}` : undefined)
+  })
+  child.on('error', (e) => settle(false, e.message))
+  const grace = setTimeout(() => settle(false, '10 秒内未收到 daemon 就绪信号'), 10_000)
+  grace.unref?.()
+}
+
+/** /desktop（REPL/TUI）：接力当前会话 + watch 租赁 */
+function handleDesktopWindow(): void {
+  launchDesktopWindow({
+    handoffSessionId: chatService.getSessionId() ?? '',
+    print: notify,
+    onSpawn: (child) => {
+      // watch 租赁：UI 存活期间监听当前会话的外部变更；electron 关窗即 app.quit → 进程 exit 回收租赁。
+      // 多次 /desktop 引用计数，全部退出才 unwatch；preview 模式下 followWatch 为空操作
+      uiLeaseCount++
+      followWatch(chatService.getSessionId())
+      let leaseReleased = false
+      const releaseLease = () => {
+        if (leaseReleased) return
+        leaseReleased = true
+        uiLeaseCount = Math.max(0, uiLeaseCount - 1)
+        if (uiLeaseCount === 0) {
+          sessionService.unwatch()
+          watchedSessionId = null
+        }
+      }
+      child.on('exit', releaseLease)
+      child.on('error', releaseLease)
+    },
+  })
 }
 
 /**
  * 探测全档壳包 @assistant-ai/chill（npm 布局下与 chill-cli 同层：node_modules/@assistant-ai/chill）。
- * electronCli 双候选：壳包私有 node_modules（嵌套安装）与顶层提升位（npm 扁平布局）。
- * 未装壳包（轻档）返回 null；装了但 electron 缺失返回 electronCli:null（话术区分两种病因）。
+ * electronExe 双候选：壳包私有 node_modules（嵌套安装）与顶层提升位（npm 扁平布局）——
+ * 直指 dist/electron.exe（不经包内 cli.js 引导：2026-10-10 事故实证官方引导在无 index.js 的
+ * 纯文件包里必崩，而 exe 本体完好；直拉 exe 同时兼容新旧两种运行时包布局）。
+ * 未装壳包（轻档）返回 null；装了但 electron 缺失返回 electronExe:null（话术区分两种病因）。
  * CHILL_SHELL_ROOT 环境变量显式覆盖（壳包启动器注入，亦便本地验证）。
  */
-function findChillShellPackage(): { root: string; electronCli: string | null } | null {
+function findChillShellPackage(): { root: string; electronExe: string | null } | null {
   const distDir = dirname(fileURLToPath(import.meta.url))
   const candidates: string[] = []
   if (process.env['CHILL_SHELL_ROOT']) candidates.push(process.env['CHILL_SHELL_ROOT'])
@@ -2457,13 +2573,13 @@ function findChillShellPackage(): { root: string; electronCli: string | null } |
     } catch { continue }
     if (pkgName !== '@assistant-ai/chill') continue
     // 候选：0.0.3+ 自有运行时包（registry 分发，安装链路零 GitHub）→ 0.0.2 官方 electron（升级兼容）
-    const electronCli = [
-      join(root, 'node_modules', '@assistant-ai', 'electron-win32-x64', 'cli.js'),
-      join(root, '..', '..', '@assistant-ai', 'electron-win32-x64', 'cli.js'),
-      join(root, 'node_modules', 'electron', 'cli.js'),
-      join(root, '..', '..', 'electron', 'cli.js'),
+    const electronExe = [
+      join(root, 'node_modules', '@assistant-ai', 'electron-win32-x64', 'dist', 'electron.exe'),
+      join(root, '..', '..', '@assistant-ai', 'electron-win32-x64', 'dist', 'electron.exe'),
+      join(root, 'node_modules', 'electron', 'dist', 'electron.exe'),
+      join(root, '..', '..', 'electron', 'dist', 'electron.exe'),
     ].find((p) => existsSync(p)) ?? null
-    return { root, electronCli }
+    return { root, electronExe }
   }
   return null
 }
@@ -3155,9 +3271,9 @@ function cliDesktopControlDeps(): DesktopControlDeps {
   return { store: ctx.keyValueStore, engine: activeEngine(), desktop: ctx.desktopController, sessionAllow: ctx.builtInExecutor }
 }
 
-/** /desktop：桌面能力开关（截屏 + 键鼠注入；状态存 configStore 键 desktop_control_enabled，默认关）。
+/** /computer：桌面操控开关（截屏 + 键鼠注入；状态存 configStore 键 desktop_control_enabled，默认关）。
  * 薄壳：开关逻辑（写键+合成消息+收回放行+探测+事件）单一事实点在 core desktopControl，此处只做参数解析与 stdout 呈现 */
-async function handleDesktop(input: string): Promise<void> {
+async function handleComputer(input: string): Promise<void> {
   const parts = input.trim().split(/\s+/)
   const action = (parts[1] || '').toLowerCase()
   if (action === 'on') {
@@ -3175,7 +3291,7 @@ async function handleDesktop(input: string): Promise<void> {
     await setDesktopControl(cliDesktopControlDeps(), false)
     process.stdout.write('已关闭桌面能力\n')
   } else if (action === 'log') {
-    // /desktop log：今日审计文件最近 20 条摘要（时间 + 描述 + 审批结论 + 结果）
+    // /computer log：今日审计文件最近 20 条摘要（时间 + 描述 + 审批结论 + 结果）
     const filePath = ctx.desktopAuditSink.todayFilePath()
     if (!existsSync(filePath)) {
       process.stdout.write('今日暂无桌面审计记录\n')
@@ -3198,7 +3314,7 @@ async function handleDesktop(input: string): Promise<void> {
       } catch { /* 单行损坏跳过，不影响其余行 */ }
     }
   } else if (action === 'audit') {
-    // /desktop audit on|off：审计开关（configStore 键 desktop_audit，读不到/'true'=on）
+    // /computer audit on|off：审计开关（configStore 键 desktop_audit，读不到/'true'=on）
     const sub = (parts[2] || '').toLowerCase()
     if (sub === 'on') {
       ctx.keyValueStore.setItem('desktop_audit', 'true')
@@ -3208,8 +3324,8 @@ async function handleDesktop(input: string): Promise<void> {
       process.stdout.write('已关闭桌面审计（新动作不再记录；已有日志保留，超过 7 天自动清理）\n')
     } else {
       process.stdout.write('用法:\n')
-      process.stdout.write('  /desktop audit on   开启桌面审计（默认）\n')
-      process.stdout.write('  /desktop audit off  关闭桌面审计\n')
+      process.stdout.write('  /computer audit on   开启桌面审计（默认）\n')
+      process.stdout.write('  /computer audit off  关闭桌面审计\n')
     }
   } else {
     const enabled = readDesktopEnabled(ctx.keyValueStore) ?? false
@@ -3217,10 +3333,10 @@ async function handleDesktop(input: string): Promise<void> {
     const auditOn = ctx.keyValueStore.getItem('desktop_audit') !== 'false'
     process.stdout.write(`桌面能力：${enabled ? '已开启' : '已关闭'}（原生模块${available ? '可用' : '不可用'}；审计${auditOn ? '开启' : '关闭'}）\n`)
     process.stdout.write('用法:\n')
-    process.stdout.write('  /desktop on   开启桌面能力（截屏 + 键鼠操作）\n')
-    process.stdout.write('  /desktop off  关闭桌面能力\n')
-    process.stdout.write('  /desktop log  查看今日审计记录（最近 20 条）\n')
-    process.stdout.write('  /desktop audit on|off  开关桌面审计\n')
+    process.stdout.write('  /computer on   开启桌面操控（截屏 + 键鼠操作）\n')
+    process.stdout.write('  /computer off  关闭桌面操控\n')
+    process.stdout.write('  /computer log  查看今日审计记录（最近 20 条）\n')
+    process.stdout.write('  /computer audit on|off  开关桌面审计\n')
   }
 }
 
@@ -4602,7 +4718,7 @@ async function handleReplInput(rawLine: string): Promise<void> {
     return
   }
 
-  if (input === '/help' || input === '/tasks' || input.startsWith('/tasks cancel') || input === '/skill' || input === '/skill list' || input === '/skill reload' || input.startsWith('/skill enable ') || input.startsWith('/skill disable ') || input.startsWith('/skill export ') || input.startsWith('/skill update ') || input.startsWith('/skill uninstall ') || input.startsWith('/skill install ') || input === '/desktop' || input === '/desktop on' || input === '/desktop off' || input === '/desktop log' || input.startsWith('/desktop audit') || input === '/tools' || input.startsWith('/tools ') || input === '/mcp' || input === '/workflow' || input === '/ui' || input === '/setup' || input === '/key' || input.startsWith('/key ') || input === '/model' || input.startsWith('/model ') || input.startsWith('/auto-apply') || input === '/add-dir' || input.startsWith('/add-dir ') || input.startsWith('/auto-switch') || input.startsWith('/config') || input === '/limits' || input.startsWith('/limits ') || input === '/team' || input.startsWith('/team ') || input.startsWith('/restore') || input === '/session' || input.startsWith('/session ') || input === '/memory' || input.startsWith('/memory ') || input === '/hooks' || input.startsWith('/hooks ') || input === '/schedule' || input.startsWith('/schedule ') || input === '/init' || input.startsWith('/init ') || input === '/tui' || input === '/cli' || input === '/switch-version' || input === '/discard-version' || input === '/fetch-source' || input === '/use-npm' || input === '/use-self' || input === '/plan' || input === '/plan off' || input === '/goal' || input.startsWith('/goal ') || input === '/pair' || input.startsWith('/pair ') || input === '/relay' || input.startsWith('/relay ') || input === '/send' || input.startsWith('/send ') || input === '/compact' || input.startsWith('/compact ') || input === '/front' || input.startsWith('/front ') || input === '/rollback' || input === '/r' || input.startsWith('/rollback ') || input.startsWith('/r ') || input === '/delete-version' || input.startsWith('/delete-version ') || (input === '/back' && chatService.mode === 'auto')) {
+  if (input === '/help' || input === '/tasks' || input.startsWith('/tasks cancel') || input === '/skill' || input === '/skill list' || input === '/skill reload' || input.startsWith('/skill enable ') || input.startsWith('/skill disable ') || input.startsWith('/skill export ') || input.startsWith('/skill update ') || input.startsWith('/skill uninstall ') || input.startsWith('/skill install ') || input === '/computer' || input === '/computer on' || input === '/computer off' || input === '/computer log' || input.startsWith('/computer audit') || input === '/tools' || input.startsWith('/tools ') || input === '/mcp' || input === '/workflow' || input === '/desktop' || input === '/web' || input === '/setup' || input === '/key' || input.startsWith('/key ') || input === '/model' || input.startsWith('/model ') || input.startsWith('/auto-apply') || input === '/add-dir' || input.startsWith('/add-dir ') || input.startsWith('/auto-switch') || input.startsWith('/config') || input === '/limits' || input.startsWith('/limits ') || input === '/team' || input.startsWith('/team ') || input.startsWith('/restore') || input === '/session' || input.startsWith('/session ') || input === '/memory' || input.startsWith('/memory ') || input === '/hooks' || input.startsWith('/hooks ') || input === '/schedule' || input.startsWith('/schedule ') || input === '/init' || input.startsWith('/init ') || input === '/tui' || input === '/cli' || input === '/switch-version' || input === '/discard-version' || input === '/fetch-source' || input === '/use-npm' || input === '/use-self' || input === '/plan' || input === '/plan off' || input === '/goal' || input.startsWith('/goal ') || input === '/pair' || input.startsWith('/pair ') || input === '/relay' || input.startsWith('/relay ') || input === '/send' || input.startsWith('/send ') || input === '/compact' || input.startsWith('/compact ') || input === '/front' || input.startsWith('/front ') || input === '/rollback' || input === '/r' || input.startsWith('/rollback ') || input.startsWith('/r ') || input === '/delete-version' || input.startsWith('/delete-version ') || (input === '/back' && chatService.mode === 'auto')) {
     if (!suppressPrompt) {
       setPrompt(promptForMode())
       reprompt()

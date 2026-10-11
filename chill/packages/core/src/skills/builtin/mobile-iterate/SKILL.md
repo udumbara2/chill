@@ -76,7 +76,7 @@ description: 手机端自迭代。修改 chill-mobile 手机端源码（界面/�
 
 1. 确认已固化（`mobile-freeze.js --status` 零差异——**推送必先固化**，mobile-push.js 会机械拒绝未固化推送）
 2. `node mobile-push.js apk <chill-mobile路径>`：自动经 ASCII 盘符跑 `gradlew assembleRelease`（**嵌 JS 的交付变体**；debug 变体不嵌 JS、离了 Metro 就是空壳，不可作交付物）→ 上传中继 → 打印下载 URL
-3. 把 URL 以 markdown 链接发给用户 → **手机点链接即走 App 内更新器**（自动下载→包名预检→自动弹系统安装页；同 debug.keystore 签名覆盖安装、数据保留；首次需给本 App"安装未知应用"授权一次——浏览器/装 CA 一概不再需要）。**降级闸**：链接快照号早于当前构建戳时 App 停在"回退安装"知情确认（数据库迁移可能不可逆）——安全回退=源码层 `--rollback` 重建重推，兜底=清数据重装
+3. 把 URL 以 markdown 链接发给用户 → **手机点链接即走 App 内更新器**（自动下载→包名预检→自动弹系统安装页；同签名键覆盖安装、数据保留——正式键经 CHILL_ANDROID_* 环境变量注入（mobile-push 对缺失一律拒绝；换键点之前的旧 APK 与新键互不可覆盖装，历史装机需卸载重装重配对）；首次需给本 App"安装未知应用"授权一次——浏览器/装 CA 一概不再需要）。**降级闸**：链接快照号早于当前构建戳时 App 停在"回退安装"知情确认（数据库迁移可能不可逆）——安全回退=源码层 `--rollback` 重建重推，兜底=清数据重装
 4. 原生层改动远程交付同路（assembleRelease 已含 native）
 5. **改 `src/db/syncDb.ts` schema 必须走既有 PRAGMA user_version 迁移纪律且向下兼容（旧库可升入）**——覆盖安装带用户真实数据升级，坏迁移=数据事故；固化前 `npm test` 必绿
 6. 推送的产物以快照 id 命名（`app-<快照名>.apk`）永存服务器——远程回退 = 重推旧 APK 链接（App 侧降级闸会要求知情确认）

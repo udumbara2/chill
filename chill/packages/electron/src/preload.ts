@@ -362,6 +362,7 @@ const api: HostAPI = {
   relayResolvePath: (opts: { input: string; workdir?: string }) =>
     ipcRenderer.invoke('relay:resolve-path', opts),
   relayCaFP: (caPath: string) => ipcRenderer.invoke('relay:ca-fp', { caPath }),
+  relayCaCert: (caPath: string) => ipcRenderer.invoke('relay:ca-cert', { caPath }),
   relayTransportConnect: (opts: { relayUrl: string; mailboxId: string; readToken: string; caPath?: string }) =>
     ipcRenderer.invoke('relay:transport-connect', opts),
   relayTransportClose: () => ipcRenderer.invoke('relay:transport-close'),

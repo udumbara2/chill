@@ -465,8 +465,15 @@ export async function startPairingSession(name: string): Promise<PairingSession>
   if (!config) throw new Error('请先配置中继（relay 地址/运营者密钥/CA 路径）')
   const startResult = await startRelay()
   const caPath = (await pm.getCaPath()) ?? undefined
+  // 指纹寻址缓存上传（配对小码 R2）：配置了私有 CA → 材料随铸造上传中继（QR 只承载锚=小码）。
+  // 信任锚不静默降级：读不到（IPC reject）→ 抛错如实呈现（重新配置中继）
+  let caMaterial: { caB64: string } | undefined
+  if (caPath) {
+    const r = await getHostAPI().relayCaCert(caPath)
+    caMaterial = { caB64: r.caB64 }
+  }
   const http = new ElectronRelayHttp(config.relayUrl, caPath)
-  const { qr, expires } = await pm.startPairing(http, config, name)
+  const { qr, expires } = await pm.startPairing(http, config, name, caMaterial)
   // 配对令牌即刻落 secureStorage：跨端配对时当前在线端的 bridge 懒读它验 pairingMAC
   await pm.savePairingToken(qr.token)
   return {

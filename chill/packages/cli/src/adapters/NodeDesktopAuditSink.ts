@@ -15,7 +15,7 @@ const RETENTION_DAYS = 7
 
 const pad = (n: number, w = 2): string => String(n).padStart(w, '0')
 
-/** 按日文件名（本地时区；/desktop log 读今日文件经 todayFilePath 用同一约定） */
+/** 按日文件名（本地时区；/computer log 读今日文件经 todayFilePath 用同一约定） */
 export function desktopAuditFileName(date: Date = new Date()): string {
   return `audit-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}.jsonl`
 }
@@ -37,7 +37,7 @@ export class NodeDesktopAuditSink implements DesktopAuditSink {
     this.dir = join(pathProvider.getUserDataPath(), 'desktop-audit')
   }
 
-  /** 今日审计文件完整路径（/desktop log 读取用） */
+  /** 今日审计文件完整路径（/computer log 读取用） */
   todayFilePath(): string {
     return join(this.dir, desktopAuditFileName())
   }

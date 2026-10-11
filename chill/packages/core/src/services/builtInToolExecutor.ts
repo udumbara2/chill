@@ -586,7 +586,7 @@ export class BuiltInToolExecutor {
       const toolName = ctx.toolName ?? ''
       if (DESKTOP_TOOLS.includes(toolName)
           && this._configStore?.getItem('desktop_control_enabled') !== 'true') {
-        return { type: 'deny', reason: '桌面控制能力未启用，用户可执行 /desktop on 开启' }
+        return { type: 'deny', reason: '桌面控制能力未启用，用户可执行 /computer on 开启' }
       }
       return { type: 'allow' }
     }
@@ -975,9 +975,9 @@ export class BuiltInToolExecutor {
    *  invoke/setValue 路径取 runtimeId 交宿主现场解析（core 不持有活元素、不做第二套查找） */
   private lastUiSnapshot: UiElementInfo[] | null = null
 
-  /** 桌面主动作的会话级放行（壳侧 [s] 回答置位；内存态，/desktop off 时壳侧调 resetDesktopSessionAllow 收回） */
+  /** 桌面主动作的会话级放行（壳侧 [s] 回答置位；内存态，/computer off 时壳侧调 resetDesktopSessionAllow 收回） */
   private desktopSessionAllowed = false
-  /** 收回桌面操作会话放行（/desktop off 时调用） */
+  /** 收回桌面操作会话放行（/computer off 时调用） */
   resetDesktopSessionAllow(): void {
     this.desktopSessionAllowed = false
   }
@@ -2647,7 +2647,7 @@ export class BuiltInToolExecutor {
     // 三级审批（逐动作恒定审批在真实桌面上会抢焦点——用户点批准 → 焦点离开目标应用 → 后续动作打错窗口）：
     // 1) 被动动作免审批：mouse_move / wait 不改变内容、不输入（截图走截屏路径，只读本就不批）；
     // 2) 主动作（click 系/drag/scroll/type/key）逐次审批，payload 带 sessionGrantable 供壳侧渲染 [s]；
-    // 3) [s] 回答（resolution.allowSession）置会话级放行，本会话后续主动作直通；内存态，/desktop off 收回。
+    // 3) [s] 回答（resolution.allowSession）置会话级放行，本会话后续主动作直通；内存态，/computer off 收回。
     // 注意：非交互模式（chill -p 任意档）在 executeAsync 入口已整体拒绝 computer_use，与本三级逻辑无交集。
     const actionDesc = this.describeComputerUseAction(params)
     // 审计审批态：被动免批 / 会话放行直通 / 逐次批准（[s] 授权当动作记 session——会话放行的起点）

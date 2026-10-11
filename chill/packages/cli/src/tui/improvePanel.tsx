@@ -3,8 +3,8 @@
  *
  * 分工：
  * - ImproveController（工厂 createImproveController）：IO 编排——打开时老化、
- *   加载决策视图（TopN/全部）、decide 直构 Decision[] 经 ImprovementLedger 唯一写入口落盘、
- *   statusline pending 镜像（异步泵，30s 由壳侧定时器驱动）。由 tuiShell 创建并注入 TuiApp。
+ *   加载决策视图（TopN/全部）、decide 直构 Decision[] 经 ImprovementLedger 唯一写入口落盘。
+ *   由 tuiShell 创建并注入 TuiApp。
  * - ImprovePanelView：纯渲染（簇行/展开条目/反馈行），无按键逻辑——按键统一在 TuiApp 的
  *   useInput 路由（与 viewer/ask 同一事实点，防多监听双触发）。
  * - ImproveUiState：光标/标记/展开等纯 UI 态，归 TuiApp 本地 state。
@@ -66,23 +66,10 @@ export interface ImproveController {
   refresh(showAll: boolean): Promise<ImprovePanelData | null>
   /** 应用决策（结构化面直构 Decision[]，不经 parseDecisionInput）；返回错误文本或 null */
   decide(decisions: Decision[]): Promise<string | null>
-  /** statusline pending 镜像（异步泵维护；null=未知/无文件） */
-  pendingMirror(): number | null
-  /** 手动泵一次镜像（壳侧 30s 定时器调用） */
-  pumpMirror(): Promise<void>
 }
 
 export function createImproveController(): ImproveController {
   let agingDone = false
-  let pending: number | null = null
-  const pump = async (): Promise<void> => {
-    try {
-      const d = await improvementLedger.getDigest()
-      pending = d?.pending ?? null
-    } catch {
-      pending = null
-    }
-  }
   const load = async (showAll: boolean): Promise<ImprovePanelData | null> => {
     const view = await improvementLedger.getView()
     if (!view) return null
@@ -98,7 +85,6 @@ export function createImproveController(): ImproveController {
       showAll,
     }
   }
-  void pump()
   return {
     async open() {
       let note: string | null = null
@@ -112,18 +98,14 @@ export function createImproveController(): ImproveController {
         }
       }
       const data = await load(false)
-      void pump()
       if (data && note) return { ...data, agingNote: note }
       return data
     },
     refresh: load,
     async decide(decisions) {
       const res = await improvementLedger.decide(decisions)
-      void pump()
       return res.ok ? null : (res.error ?? '写入失败')
     },
-    pendingMirror: () => pending,
-    pumpMirror: pump,
   }
 }
 

@@ -3,8 +3,8 @@
  *
  * 两条开关、两处入口、一份逻辑：
  * - 键值真相：desktop_control_enabled（桌面能力：截屏+键鼠注入放行）/ autoSwitchAfterIteration（自迭代后自动版本切换）
- *   —— 与 CLI 本地 /desktop、/auto-switch 完全同键同源（谁写都一样，读点全部收敛到这两个常量）
- * - 入口一：CLI/TUI 本地命令（cli.ts handleDesktop/handleAutoSwitch 薄壳——stdout 呈现留壳）
+ *   —— 与 CLI 本地 /computer、/auto-switch 完全同键同源（谁写都一样，读点全部收敛到这两个常量）
+ * - 入口一：CLI/TUI 本地命令（cli.ts handleComputer/handleAutoSwitch 薄壳——stdout 呈现留壳）
  * - 入口二：命令面执行器（commandSurface 'desktop.set'/'autoswitch.set'——手机遥控）
  * - 变更通告：DESKTOP_CONTROL_TOGGLED / AUTOSWITCH_TOGGLED（唯一变更通告口——本地与遥控经同一事件收敛，
  *   relay 桥 wireCommandState 订阅即时推 cmd.state；emit 在本核心而非引擎，"不为发事件改引擎"）
@@ -73,7 +73,7 @@ export const DESKTOP_ENABLED_NOTICE =
   '【桌面能力已开启】你新增了三个内置工具：capture_screen（截取主显示器屏幕，只读免审批，返回缩放后图像与坐标系说明）；inspect_ui（UI 元素感知，只读免审批，返回当前窗口可交互元素编号表）；computer_use（键鼠操作：元素级动作 click_element/set_value/focus_window 按 inspect_ui 编号操作（优先），像素动作点击/拖拽/滚动/输入文本/组合键/等待（回退），主动作需用户审批，coordinate 以最近一次截图的图像坐标系为准）。若当前模型不支持视觉，截图图片会被替换为占位符，建议提醒用户切换视觉模型。'
 
 export const DESKTOP_DISABLED_NOTICE =
-  '【桌面能力已关闭】capture_screen、inspect_ui 与 computer_use 已从你的可用工具集移除，不要再尝试调用；如用户询问，请说明桌面能力已被用户关闭（可用 /desktop on 重新开启）。'
+  '【桌面能力已关闭】capture_screen、inspect_ui 与 computer_use 已从你的可用工具集移除，不要再尝试调用；如用户询问，请说明桌面能力已被用户关闭（可用 /computer on 重新开启）。'
 
 // ==================== 写面（共享核心） ====================
 

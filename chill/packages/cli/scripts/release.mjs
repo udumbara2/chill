@@ -24,7 +24,8 @@
  * Gitee 补齐 tag 后国内用户自动恢复快速源）。默认双仓全查。
  * 禁止绕过本脚本在任何目录手动 npm publish。
  */
-import { mkdtempSync, mkdirSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, copyFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -134,6 +135,18 @@ function robustRemove(p) {
     console.error(`⚠️ 工作区清理不完全（${e.message}）：${p}——请手动删除`);
   }
 }
+
+// 启动前清场：扫描并清除历史泄漏的 chill-release-* 工作区（每次失败泄漏 ~1-1.5GB，多次叠加会榨干磁盘——今晚三连败的元凶）
+try {
+  const tmpDir = tmpdir();
+  for (const entry of fs.readdirSync(tmpDir)) {
+    if (entry.startsWith('chill-release-')) {
+      const stale = join(tmpDir, entry);
+      console.log(`[清场] 移除历史工作区: ${entry}`);
+      robustRemove(stale);
+    }
+  }
+} catch { /* 清场失败不阻塞发布 */ }
 
 const work = mkdtempSync(join(tmpdir(), 'chill-release-'));
 console.log(`隐士发布工作区：${work}（ref=${ref}${dryRun ? '，dry-run' : ''}${githubOnly ? '，github-only' : ''}）`);

@@ -188,7 +188,7 @@ function createCliChatEngineWithOptions(
       }
     },
     secureStorage: ctx.secureStorage,
-    // 桌面工具开关（1.9 Layer 1 注册过滤）：现读 configStore，/desktop on|off 即时生效（缺省 false=关）
+    // 桌面工具开关（1.9 Layer 1 注册过滤）：现读 configStore，/computer on|off 即时生效（缺省 false=关）
     desktopToolsEnabled: () => ctx.keyValueStore.getItem(DESKTOP_CONTROL_ENABLED_KEY) === 'true',
     // 工具渐进发现开关：现读 configStore 键 progressive_tools，opt-out（读不到/'true'=开，'false'=关），
     // /tools mode on|off 即时生效（与 desktop 的 opt-in 相反，未配置默认开）

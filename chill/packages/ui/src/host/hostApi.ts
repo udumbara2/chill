@@ -58,7 +58,7 @@ export interface HostAPI {
   /** 跨端同步：报告当前会话 id 让宿主重定向 watch；对端变更经 onSessionChanged 推回 */
   sessionWatch: (id: string) => Promise<{ success: boolean; error?: string }>
   sessionLoadIfNewer: (id: string) => Promise<{ success: boolean; record?: any | null; error?: string }>
-  /** handoff 三值：'<id>'=CLI /ui 接力该会话；''=接力但 CLI 无落盘会话；null=非 /ui 启动 */
+  /** handoff 三值：'<id>'=CLI /desktop 接力该会话；''=接力但 CLI 无落盘会话；null=非 /desktop 启动 */
   sessionGetHandoffId: () => Promise<string | null>
   onSessionChanged: (callback: (record: any | null) => void) => void
   /** 窗口重新聚焦推送（注意力边界全量刷新会话列表） */
@@ -289,6 +289,8 @@ export interface HostAPI {
   /** d→m 文件发送读侧：路径解析（~ 展开 + 相对路径按会话工作目录解析 + 规范化绝对路径；顺带回报 homeDir 与大小写敏感性——桥层 denylist 判定基准） */
   relayResolvePath: (opts: { input: string; workdir?: string }) => Promise<{ path: string; homeDir: string; caseInsensitive: boolean }>
   relayCaFP: (caPath: string) => Promise<{ caFP: string }>
+  /** 配对小码 R2：CA 文件原始字节 base64（供铸造上传；渲染进程无 fs，UI-only 配对依赖此通道） */
+  relayCaCert: (caPath: string) => Promise<{ caB64: string }>
   relayTransportConnect: (opts: {
     relayUrl: string
     mailboxId: string

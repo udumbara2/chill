@@ -141,6 +141,13 @@ if (!fs.existsSync(pkgPath) || !fs.existsSync(path.join(mobilePath, 'App.tsx')))
 if (!cfg.deskPub) {
   fail(`配置缺 deskPub（版本清单必需）：在 chill 交互终端运行 /pair deskpub 导出本机设备公钥，一次性配入 ${configPath} 的 "deskPub" 字段`)
 }
+// 官方交付物必须正式签名（2026-10-11 规划迭代 D）：debug 键密码是公开常识——公开分发的
+// debug 签名 APK = 任何人可签「官方更新」覆盖所有装机（供应链洞）。缺环境变量一律拒绝。
+for (const v of ['CHILL_ANDROID_KEYSTORE', 'CHILL_ANDROID_STORE_PASSWORD', 'CHILL_ANDROID_KEY_ALIAS', 'CHILL_ANDROID_KEY_PASSWORD']) {
+  if (!process.env[v]) {
+    fail(`官方交付物必须正式签名：缺环境变量 ${v}（keystore 栖息地 ~/.chill/keys/；新终端生效——用户级环境变量已配置的话）`)
+  }
+}
 const parentDir = path.dirname(mobilePath)
 const guardianDir = __dirname
 const freezeScript = path.join(guardianDir, 'mobile-freeze.js')
@@ -210,6 +217,41 @@ if (gr.status !== 0) fail('assembleRelease 失败（构建错误，未上传任�
 
 const apkPath = path.join(buildRoot, 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk')
 if (!fs.existsSync(apkPath)) fail(`构建成功但找不到产物：${apkPath}`)
+
+// ---------- 发布前 APK 扫描绊线（发布防泄露四支柱：扫描是绊线不是承重墙） ----------
+// 解包后全文件扫：私钥 PEM 标记 + 本机真实凭据值（bearer/中继地址——8 字符以上才参与，
+// 防短值误报）。命中即拒传。tar=Windows 自带 bsdtar，可解 zip。
+function scanApk(apk) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'chill-apkscan-'))
+  try {
+    const ex = spawnSync('tar', ['-xf', apk, '-C', tmp], { windowsHide: true, stdio: 'ignore' })
+    if (ex.status !== 0) fail(`APK 扫描解包失败（tar 退出码 ${ex.status}）`)
+    const pemRe = /-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/
+    const dyn = [cfg.bearer, cfg.relayBase].filter((v) => typeof v === 'string' && v.length >= 8)
+    const hits = []
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name)
+        if (e.isDirectory()) walk(p)
+        else {
+          const text = fs.readFileSync(p).toString('latin1')
+          if (pemRe.test(text)) hits.push(`${path.relative(tmp, p)}: 私钥 PEM 标记`)
+          for (const v of dyn) if (text.includes(Buffer.from(v, 'utf8').toString('latin1'))) hits.push(`${path.relative(tmp, p)}: 本机凭据值命中`)
+        }
+      }
+    }
+    walk(tmp)
+    return hits
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
+const scanHits = scanApk(apkPath)
+if (scanHits.length > 0) {
+  fail(`APK 扫描命中（不得上传——排查后再推）:\n  ${scanHits.join('\n  ')}`)
+}
+console.log('ℹ APK 扫描绊线通过（无私钥标记/本机凭据值）')
+
 const name = `apk/app-${snapshotId}.apk`
 console.log(`ℹ 上传（${(fs.statSync(apkPath).size / 1024 / 1024).toFixed(1)} MB，溯源快照 ${snapshotId}）…`)
 const r = await publish(name, apkPath)

@@ -40,6 +40,16 @@ import {
 } from './envelope';
 import { PendingOlderTracker } from './pendingOlderTracker';
 import { CA_FP } from './ca-bundle';
+import {
+  resolvePairingTrust,
+  cleartextWarning,
+  applyTrustToNative,
+  nativeCaFetcher,
+  bootstrapPairingCa,
+  caB64ToBytes,
+  caBytesMatchFp,
+  caBytesToDerB64,
+} from './trust';
 import { httpJson, sleep, httpBase } from './http';
 import { uploadFile, buildAttachments, postWithRetry, defaultSleep } from './fileUploader';
 import { publishMedia, receiptWaitStep, STATIC_RECEIPT_TICK_MS } from './mediaPublisher';
@@ -96,6 +106,12 @@ export interface QrPayload {
   caFP: string;
   token: string;
   name: string;
+  /**
+   * CA 证书（additive，2026-10-11 规划迭代 B/C）：base64(DER)，随码分发的完整信任锚。
+   * 双份契约另一侧=core PairingManager.ts QrPayload（不在 sync-envelope 链，手维护互指）。
+   * 消费语义见 trust.ts 三态判定（严格钉住，不并内置；不与 caFP 交叉校验——安全剧场留痕）。
+   */
+  caCert?: string;
 }
 
 export type SessionState =
@@ -655,6 +671,15 @@ export class RelaySession {
     this.state = saved;
     this.confirmed = saved.confirmed;
     this.setupCrypto();
+    // 信任态恢复（规划迭代 B）：tls 在配对时刻持久化；无 tls=legacy 缺省快照（Application 已装配）。
+    // 必须先于 connectWs——WS 建立即走 TLS 握手。
+    if (saved.tls) {
+      try {
+        await applyTrustToNative(saved.tls);
+      } catch {
+        /* 坏持久化（理论不可达：写入前经原生校验）→ 保持缺省快照，由握手失败如实暴露 */
+      }
+    }
     this.deskName = saved.deskName ?? '';
     if (this.confirmed) await this.initSyncState(); // M6：副本库 + 附着意图恢复
     this.setState(this.confirmed ? 'paired' : 'waiting-confirm');
@@ -681,7 +706,10 @@ export class RelaySession {
     this.mac = pairingMAC(s.token, s.deskPub, s.publicKey);
   }
 
-  /** 扫码配对入口（qrJson 为 QR 内容文本；caFP 不符即拒） */
+  /** 配对期警示文案（ws:// 明文中继；redeem/waiting-confirm 状态行呈现——决策现场知情） */
+  private pairWarn = '';
+
+  /** 扫码配对入口（qrJson 为 QR 内容文本） */
   async pair(qrJson: string): Promise<void> {
     let qr: QrPayload;
     try {
@@ -690,10 +718,55 @@ export class RelaySession {
       this.setState('error', '二维码内容不是合法 JSON');
       return;
     }
-    if (qr.caFP && qr.caFP !== CA_FP) {
-      this.setState('error', 'caFP 与本 App 内置 CA 不符，可能是伪造中继，中止配对');
+    // —— 信任判定（规划 R3 四态五分支；SSOT=trust.ts，执行=原生 CaTrustModule）——
+    // 必须先于 redeem 生效：redeem 本身走 TLS（never trust before verify）。
+    const trust = resolvePairingTrust(qr);
+    if (!trust.ok) {
+      this.setState('error', trust.error);
       return;
     }
+    let tls = trust.tls;
+    if (trust.bootstrap) {
+      // 引导取材（配对小码 R3 新常态）：材料经 /pair/ca/:fp 取材，QR caFP 指纹是唯一锚——
+      // 获取≠信任：hash 不符/解析失败一律中止（MITM 替换/重放/缓存损坏全被锚拦死）
+      const fetcher = nativeCaFetcher();
+      if (!fetcher) {
+        this.setState('error', '本环境不支持证书取材（原生模块缺失），中止配对');
+        return;
+      }
+      this.setState('redeeming', '正在获取中继证书…');
+      const r = await bootstrapPairingCa(qr, fetcher);
+      if ('error' in r) {
+        this.setState('error', r.error);
+        return;
+      }
+      const bytes = caB64ToBytes(r.caB64);
+      if (!bytes || !caBytesMatchFp(bytes, qr.caFP)) {
+        this.setState('error', '取材证书与二维码指纹不符（可能被篡改或缓存损坏），中止配对');
+        return;
+      }
+      const derB64 = caBytesToDerB64(bytes);
+      if (!derB64) {
+        this.setState('error', '取材证书无法解析（既非 PEM 也非 DER），中止配对');
+        return;
+      }
+      try {
+        await applyTrustToNative({ mode: 'pinned', caB64: derB64 });
+      } catch (e) {
+        this.setState('error', `中继 CA 证书无效（${String(e)}），中止配对`);
+        return;
+      }
+      tls = { mode: 'pinned', caB64: derB64 };
+    } else {
+      // 非 bootstrap 分支显式 apply——重扫 legacy 码时不残留上一配对的钉住态
+      try {
+        await applyTrustToNative(trust.tls ?? null);
+      } catch (e) {
+        this.setState('error', `中继 CA 证书无效（${String(e)}），中止配对——请检查桌面端 /pair config 的 CA 配置`);
+        return;
+      }
+    }
+    this.pairWarn = cleartextWarning(qr.relay);
     this.deskName = qr.name;
     this.emit({ type: 'peer', name: qr.name });
 
@@ -711,11 +784,13 @@ export class RelaySession {
         deskName: qr.name, // M6：agents 表 name 字段数据源（QR 的桌面设备名）
         confirmed: false,
         helloSent: false,
+        ...(tls ? { tls } : {}), // 信任态随配对持久化（additive；legacy 缺省不写键）
       };
       await savePhoneState(this.state);
     } else {
       this.state = saved;
       this.state.deskName = qr.name; // 重配对刷新桌面名
+      this.state.tls = tls; // 同 token 重扫也按新 QR 刷新信任态（JSON.stringify 落盘时 undefined 键自然剔除）
       await savePhoneState(this.state);
     }
     this.setupCrypto();
@@ -724,7 +799,7 @@ export class RelaySession {
 
   private async redeem(): Promise<void> {
     const s = this.state!;
-    this.setState('redeeming');
+    this.setState('redeeming', this.pairWarn || undefined);
     const body = {
       phonePub: s.publicKey,
       deskPub: s.deskPub,
@@ -783,7 +858,7 @@ export class RelaySession {
       s.helloSent = true;
       await savePhoneState(s);
     }
-    this.setState('waiting-confirm');
+    this.setState('waiting-confirm', this.pairWarn || undefined);
     this.connectWs();
     this.armConfirmTimeout();
   }
@@ -2651,6 +2726,13 @@ export class RelaySession {
       await httpJson('DELETE', s.relay, `/box/${this.deskBox}`, { token: this.secrets.revokeToken }).catch(() => {});
     }
     await clearPhoneState();
+    // 信任态随配对清空回缺省快照（内置 CA）——下一配对按新 QR 三态重判（规划迭代 B）
+    this.pairWarn = '';
+    try {
+      await applyTrustToNative(null);
+    } catch {
+      /* 原生层缺省快照兜底 */
+    }
     // M6：副本库整库清空（agents/projects/sessions/messages/syncState）——不留旧桌面数据（泄露面+混淆源）
     const db = this.db();
     if (db) await db.wipeAll().catch(() => {});

@@ -285,6 +285,7 @@ export function createWsHost(from?: { token?: string; wsTarget?: string }): WsHo
     relayStatFile: (o) => call('relay:stat-file', o),
     relayResolvePath: (o) => call('relay:resolve-path', o),
     relayCaFP: (p) => call('relay:ca-fp', p),
+    relayCaCert: (p) => call('relay:ca-cert', p),
     relayTransportConnect: (o) => call('relay:transport-connect', o),
     relayTransportClose: () => call('relay:transport-close'),
     onRelayTransportMessage: (cb) => subscribe('relay:transport-message', cb),

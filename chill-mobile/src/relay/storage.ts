@@ -21,6 +21,12 @@ export interface PhoneState {
   dismissedSnapshot?: string | null;
   /** 更新发现（additive）：上次检查结果码（found:<快照>/up-to-date/bad-manifest/http-<n>/network-error）——设置页诊断行数据源 */
   lastUpdateStatus?: string;
+  /**
+   * TLS 信任态（additive，2026-10-11 规划迭代 B）：扫码时刻 QR 声明的信任集。
+   * pinned=严格钉住 QR 带来的 CA；system=公共证书（WebPKI）；缺省=legacy（内置 CA，旧配对态兼容锚）。
+   * 判定 SSOT=trust.ts resolvePairingTrust；执行层=android CaTrustModule。
+   */
+  tls?: { mode: 'pinned'; caB64: string } | { mode: 'system' };
 }
 
 const SERVICE = 'chill.pairing';

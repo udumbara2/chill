@@ -197,7 +197,7 @@ export class CliChatService {
     return this.engine.compactHistory(guidance)
   }
 
-  /** 当前会话 id（watch 跟随、/ui handoff 用；未落盘前为 null） */
+  /** 当前会话 id（watch 跟随、/desktop handoff 用；未落盘前为 null） */
   getSessionId(): string | null {
     return this.engine.getSessionState().sessionId
   }

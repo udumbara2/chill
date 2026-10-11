@@ -1393,7 +1393,7 @@ onMounted(() => {
     void projectStore.loadSessions()
   })
 
-  // 启动恢复（handoff 三值契约）：'<id>'=CLI /ui 接力该会话（未命中保持空会话）；
+  // 启动恢复（handoff 三值契约）：'<id>'=CLI /desktop 接力该会话（未命中保持空会话）；
   // ''=接力但 CLI 尚无落盘会话 → 全新空会话（不回退历史最新）；null=直接启动 → 恢复"updatedAt 最新者"；
   // 无历史会话时保持全新引擎会话（首次落盘由引擎生成 id）
   void (async () => {

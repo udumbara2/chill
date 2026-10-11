@@ -122,7 +122,7 @@ export const useProjectStore = defineStore('project', () => {
   /**
    * 懒采纳（「项目=文件夹」迭代5）：无 projectId 且 workdir 非空的会话**被打开时**，
    * 匹配既有绑定项目（normalizePathForCompare 同一套）→ 落空且文件夹仍存在则以文件夹名
-   * 自动建项目并归组——CLI 在绑定文件夹内启动产生的会话经 /ui 接力后不再是"未分组"。
+   * 自动建项目并归组——CLI 在绑定文件夹内启动产生的会话经 /desktop 接力后不再是"未分组"。
    * 来源无关（CLI/UI 未分组会话同一规则）、懒触发（仅会话被打开/handoff，启动不批量扫描）。
    * 全程 fail-soft：任一步不满足/失败 → 跳过，会话保持未分组，不抛错。
    * 3.6：**记录已落盘才采纳**——sessionId 已预铸但文件不存在（未落盘的新会话）时不采纳、

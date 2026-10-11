@@ -120,3 +120,42 @@ export function registerPasteProvider(fn: PasteProvider | null): void {
 export function presentPaste(): string {
   return pasteProvider ? pasteProvider() : ''
 }
+
+/** QR 全屏视图载荷（2026-10-11 TUI 配对原生化）：lines=半块字符行（qrBlock 产物，黑码白底由呈现层着色） */
+export interface QrViewPayload {
+  lines: string[]
+  cols: number
+  title: string
+}
+
+/** QR 呈现者：全屏展示，用户按任意关闭键时 resolve（出码流程在此期间等待） */
+export type QrPresenter = (payload: QrViewPayload) => Promise<void>
+
+let qrPresenter: QrPresenter | null = null
+
+/** 注册/清空 QR 呈现者（tuiShell 进入时注册、离开时置 null） */
+export function registerQrPresenter(fn: QrPresenter | null): void {
+  qrPresenter = fn
+}
+
+export function hasQrPresenter(): boolean {
+  return qrPresenter !== null
+}
+
+/** 经 TUI 全屏展示二维码；未注册时返回 undefined，调用方回退 PNG */
+export function presentQr(payload: QrViewPayload): Promise<void> | undefined {
+  return qrPresenter ? qrPresenter(payload) : undefined
+}
+
+/** QR 视图程序化关闭槽（tuiShell 注册呈现者时填充）：扫码成功/超时后由流程主动关视图 */
+let qrCloserFn: (() => void) | null = null
+
+export function setQrCloser(fn: (() => void) | null): void {
+  qrCloserFn = fn
+}
+
+/** 程序化关闭 QR 视图（无视图时无操作）——扫码成功后自动收码、让确认卡回到眼前 */
+export function closeQrView(): void {
+  qrCloserFn?.()
+  qrCloserFn = null
+}

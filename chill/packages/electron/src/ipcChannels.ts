@@ -99,6 +99,8 @@ export const IPC_CHANNELS = {
   RELAY_STAT_FILE: 'relay:stat-file',
   RELAY_RESOLVE_PATH: 'relay:resolve-path',
   RELAY_CA_FP: 'relay:ca-fp',
+  /** 凭证入码（规划迭代 C）：CA 文件 → QR caCert 载荷（PEM/DER + 容量闸，core 纯函数） */
+  RELAY_CA_CERT: 'relay:ca-cert',
   RELAY_TRANSPORT_CONNECT: 'relay:transport-connect',
   RELAY_TRANSPORT_CLOSE: 'relay:transport-close',
   RELAY_TRANSPORT_MESSAGE: 'relay:transport-message',

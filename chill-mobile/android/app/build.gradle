@@ -90,12 +90,33 @@ android {
             abiFilters "arm64-v8a", "x86_64"
         }
     }
+    /**
+     * 正式签名（2026-10-11 规划迭代 D，F4）：环境变量注入——keystore/密码永不入仓
+     * （Tier0 栖息地：~/.chill/keys/ + 密码管理器 + 离线介质双备份）。
+     * 缺环境变量时 release 回退 debug 签名并大声警告：公开源自建者本地构建可用，
+     * 但官方交付物必须正式键——mobile-push.js apk 命令对此机械把关（缺环境变量拒绝构建）。
+     * 换键纪律：换键点之前的旧 APK 与新键互不可覆盖安装（快照回退链从换键点重新起算）。
+     */
+    def releaseKeystorePath = System.getenv('CHILL_ANDROID_KEYSTORE')
+    def releaseStorePassword = System.getenv('CHILL_ANDROID_STORE_PASSWORD')
+    def releaseKeyAlias = System.getenv('CHILL_ANDROID_KEY_ALIAS')
+    def releaseKeyPassword = System.getenv('CHILL_ANDROID_KEY_PASSWORD')
+    def hasReleaseSigning = releaseKeystorePath != null && releaseStorePassword != null \
+        && releaseKeyAlias != null && releaseKeyPassword != null
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
             storePassword 'android'
             keyAlias 'androiddebugkey'
             keyPassword 'android'
+        }
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
         }
     }
     buildTypes {
@@ -105,7 +126,10 @@ android {
         release {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
+            if (!hasReleaseSigning) {
+                println '⚠️  release 回退 debug 签名（未配置 CHILL_ANDROID_* 环境变量）——产物不得用于官方分发/更新'
+            }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }

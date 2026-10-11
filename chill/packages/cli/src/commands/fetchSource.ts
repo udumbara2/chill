@@ -64,16 +64,31 @@ export function isSelfVersionUsable(home: string | null): boolean {
   return !!home && existsSync(join(home, 'packages', 'cli', 'dist', 'cli.js'))
 }
 
+/** 包根推导：运行时文件恒为 dist/cli.js，而 dist 是包根的直接子目录（npm 包 / workspace
+ *  源码版 / npx 缓存三种布局同构），一级向上即可——与 bootstrap.ts / cli.ts 读版本的既有
+ *  正确写法对齐。旧版两级向上在 esbuild 内联布局下越过包根指向 node_modules，是 v0.0.0
+ *  下载 404 的根因（2026-10-10 npm 用户实测必经断点；guardian 副本复制用同一函数同病）。 */
 function getOwnPackageRoot(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+  return join(dirname(fileURLToPath(import.meta.url)), '..')
 }
 
+/** 读自身版本。读不到 / name 不符时显式抛错——严禁静默兜底 '0.0.0'（无声 404 的排查
+ *  代价不值得付第二次）；调用方转为 ok:false 让用户看到明确原因。 */
 function getOwnVersion(): string {
+  const pkgPath = join(getOwnPackageRoot(), 'package.json')
+  let pkg: { name?: unknown; version?: unknown }
   try {
-    return JSON.parse(readFileSync(join(getOwnPackageRoot(), 'package.json'), 'utf-8')).version ?? '0.0.0'
+    pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
   } catch {
-    return '0.0.0'
+    throw new Error(`无法读取 ${pkgPath}——无法确定 chill 包根，构造源码下载地址需要自身版本号。`)
   }
+  if (pkg?.name !== '@assistant-ai/chill-cli') {
+    throw new Error(`${pkgPath} 的 name 为 ${String(pkg?.name)}，期望 @assistant-ai/chill-cli（包布局可能已变更）。`)
+  }
+  if (typeof pkg.version !== 'string' || !pkg.version) {
+    throw new Error(`${pkgPath} 缺少 version 字段。`)
+  }
+  return pkg.version
 }
 
 /** 按序生成候选下载地址（CHILL_SOURCE_URL 显式覆盖优先，用于本地验证） */
@@ -86,9 +101,20 @@ function candidateUrls(version: string): string[] {
   ]
 }
 
-function hasPnpm(): boolean {
-  const r = spawnSync('pnpm --version', { shell: true, stdio: 'ignore' })
-  return r.status === 0
+/** pnpm 版本门槛：pnpm-workspace.yaml 的 allowBuilds（依赖构建脚本白名单）为 pnpm 10.26.0
+ *  引入的机制，旧版会静默无视白名单、按默认全跑构建脚本——错误形态远离根因，晚撞墙不如早拦截。 */
+const MIN_PNPM = [10, 26] as const
+
+/** pnpm 前置双检（存在性 + 版本，共用同一次探测）。stdout 解析不出 semver 时按旧的存在性
+ *  语义放行——非常规构建形态不误拦。 */
+function checkPnpm(): 'ok' | 'missing' | { old: string } {
+  const r = spawnSync('pnpm --version', { shell: true, stdio: ['ignore', 'pipe', 'ignore'] })
+  if (r.status !== 0 || !r.stdout) return 'missing'
+  const m = /^v?(\d+)\.(\d+)/.exec(r.stdout.toString().trim())
+  if (!m) return 'ok'
+  const [major, minor] = [Number(m[1]), Number(m[2])]
+  if (major > MIN_PNPM[0] || (major === MIN_PNPM[0] && minor >= MIN_PNPM[1])) return 'ok'
+  return { old: `${major}.${minor}` }
 }
 
 function runIn(cwd: string, command: string): void {
@@ -140,9 +166,24 @@ export async function fetchSource(opts: FetchSourceOptions): Promise<FetchSource
     }
   }
 
-  // 前置检查 pnpm（workspace 构建依赖）
-  if (!hasPnpm()) {
-    return { ok: false, message: '未检测到 pnpm。请先执行 corepack enable（Node 自带）或 npm i -g pnpm，然后重试 /fetch-source。' }
+  // 前置检查 pnpm（workspace 构建依赖；双检=存在性+版本）。文案四问：为什么/不装会怎样/怎么装/装完干嘛。
+  const pnpm = checkPnpm()
+  if (pnpm === 'missing') {
+    return {
+      ok: false,
+      message:
+        '未检测到 pnpm。源码需在本地「安装依赖 + 编译」后才能运行，本仓库依赖\n' +
+        '仅 pnpm 可装（npm/yarn 不支持）；不装不影响 chill 日常使用，仅无法进入\n' +
+        '源码自迭代模式。\n' +
+        '安装：npm i -g pnpm（Node <22 请装 pnpm@10，详见 README「自迭代」章节）\n' +
+        '装好后重试 /fetch-source。',
+    }
+  }
+  if (pnpm !== 'ok') {
+    return {
+      ok: false,
+      message: `检测到 pnpm ${pnpm.old}，本仓库需 ≥${MIN_PNPM[0]}.${MIN_PNPM[1]}（依赖构建脚本白名单 allowBuilds 为 pnpm 10.26 引入，旧版会静默无视）。\n请升级：npm i -g pnpm@10\n然后重试 /fetch-source。`,
+    }
   }
 
   const workspaceDir = getWorkspaceDir()
@@ -156,7 +197,16 @@ export async function fetchSource(opts: FetchSourceOptions): Promise<FetchSource
     if (existsSync(projectDir)) {
       removeRecursive(projectDir)
     }
-    const version = getOwnVersion()
+    // CHILL_SOURCE_URL 显式覆盖时版本号不参与下载地址（candidateUrls 直接返回覆盖地址）；
+    // 否则必须读对且读得出——读错=双源 404，读不出=显式失败，均不再静默兜底 0.0.0
+    let version = ''
+    if (!process.env.CHILL_SOURCE_URL) {
+      try {
+        version = getOwnVersion()
+      } catch (e: any) {
+        return { ok: false, message: `无法确定自身版本：${e?.message ?? e}` }
+      }
+    }
     // 临时目录落在 workspace 内（与目标同卷）：renameSync 跨卷必败——libuv 的
     // MoveFileExW 不带 MOVEFILE_COPY_ALLOWED，POSIX rename(2) 跨挂载点同样 EXDEV；
     // 同卷落点是构造上消灭该失败面，而非事后兜底

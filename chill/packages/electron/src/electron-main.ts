@@ -264,7 +264,7 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   appReady = true // 全局兜底进入运行期策略：此后未捕获错误只记录不退出
   // M3.1（版本切换接续规划）：换版接续——主进程订阅换版令牌，发现即以 junction 形态重启自身
-  // （node electron-cli <junction根>：路径在 spawn 时刻解析、必穿当前 junction；参照 cli.ts /ui 形态 1）。
+  // （node electron-cli <junction根>：路径在 spawn 时刻解析、必穿当前 junction；参照 cli.ts /desktop 形态 1）。
   // **禁用 app.relaunch()**：Electron 启动时把应用路径 realpath 化（junction 透明），relaunch 复用旧
   // argv 会精准重启回旧版本目录——机制看似工作、不变量默默失效。
   // 体验形态（workcopy 内运行）不接续：验收使命随 workcopy 清理结束（自毁定时器负责关窗）。
@@ -1335,8 +1335,8 @@ ipcMain.handle('session:watch', async (_event, id: string) => {
 })
 // 发送前锚定：仅当磁盘记录比本端最后一次写入/采纳更新时才返回整 record（否则 record 为 null）
 ipcMain.handle('session:loadIfNewer', async (_event, id: string) => sessionPersistence.loadIfNewer(id))
-// CLI /ui handoff（三值契约）：'<id>'=接力该会话；''=接力但 CLI 无落盘会话（UI 开全新空会话）；
-// null=非 /ui 启动（env 未注入，UI 回退"最新者"）
+// CLI /desktop handoff（三值契约）：'<id>'=接力该会话；''=接力但 CLI 无落盘会话（UI 开全新空会话）；
+// null=非 /desktop 启动（env 未注入，UI 回退"最新者"）
 ipcMain.handle('session:handoff-id', async () => process.env.CHILL_SESSION_ID ?? null)
 // ========== relay 会话同步（M6 渲染端无 fs：组包/目录监听只在主进程跑，逻辑在 core 单一事实点） ==========
 // catalog 组包：渲染端 buildCatalogState 覆写为本 IPC（buildCatalogStateBody=与 makeSessionSyncBridgeDeps 同一函数）

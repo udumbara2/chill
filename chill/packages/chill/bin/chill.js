@@ -4,7 +4,7 @@
  *
  * npm 全局安装不链接依赖包的 bin——壳包必须自己声明 bin 并转发到 chill-cli 的
  * bootstrap（该文件为 ESM bundle，不能 require，故以子进程透传 argv/退出码）。
- * 注入 CHILL_SHELL_ROOT 供 CLI 侧 /ui 探测壳包根（探测另有同层候选兜底，双保险）。
+ * 注入 CHILL_SHELL_ROOT 供 CLI 侧 /desktop 探测壳包根（探测另有同层候选兜底，双保险）。
  */
 const { spawn } = require('node:child_process')
 const path = require('node:path')

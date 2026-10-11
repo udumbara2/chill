@@ -138,3 +138,131 @@ test('SchedulerService 集成：抢占失败跳过本轮；markFired 落定释�
   const reGate = createClaimGate({ fs, claimsDir: '/claims', now: () => T0 })
   assert.equal(await reGate.acquire('t-c'), true, 'markFired 落定即释放 claim')
 })
+
+/**
+ * 2026-10-11 回归（周期任务"触发一次后永久哑"根治）：
+ * ① Windows 反斜杠目录 → claim 路径分隔符必须统一（混合分隔符使 Shell COM ParseName
+ *   返 null、deleteFile 静默失败——旧版 `${dir}/${id}.json` 硬拼 `/` 即此病）；
+ * ② 释放/过期复活一律走 hardDeleteFile 硬删（内部账目不过回收站）；
+ * ③ 硬删失败必须可观测（console.error）；ENOENT=已释放，不算失败（幂等零噪音）。
+ */
+function makeHardDeleteFs(opts: { files?: Record<string, string>; hardResult?: () => { success: boolean; error?: string } } = {}) {
+  const files = new Map(Object.entries(opts.files ?? {}))
+  const hardDeleted: string[] = []
+  const softDeleted: string[] = []
+  const fs: IFileSystemProvider = {
+    readFile: async (p: string) => {
+      const content = files.get(p)
+      return content === undefined ? { success: false, error: 'ENOENT: no such file' } : { success: true, data: { content } }
+    },
+    writeFile: async (p: string, content: string) => {
+      files.set(p, content)
+      return { success: true }
+    },
+    deleteFile: async (p: string) => {
+      softDeleted.push(p)
+      files.delete(p)
+      return { success: true }
+    },
+    hardDeleteFile: async (p: string) => {
+      hardDeleted.push(p)
+      const forced = opts.hardResult?.()
+      if (forced && !forced.success) return forced
+      files.delete(p)
+      return { success: true }
+    },
+    listDirectory: async () => ({ success: true, data: { files: [] } }),
+    getCurrentDirectory: () => '/proj',
+    fileExists: async (p: string) => ({ success: true, data: files.has(p) }),
+    getPathType: async (p: string) => ({
+      success: true,
+      data: { type: files.has(p) ? ('file' as const) : ('not_found' as const) },
+    }),
+    createFileExclusive: async (p: string, content: string) => {
+      if (files.has(p)) return { success: true, data: false }
+      files.set(p, content)
+      return { success: true, data: true }
+    },
+  }
+  return { fs, files, hardDeleted, softDeleted }
+}
+
+test('claimGate：Windows 反斜杠目录 → claim 路径分隔符统一（无混合分隔符）', async () => {
+  const created: string[] = []
+  const fs: IFileSystemProvider = {
+    readFile: async () => ({ success: false, error: 'ENOENT: no such file' }),
+    writeFile: async () => ({ success: true }),
+    deleteFile: async () => ({ success: true }),
+    listDirectory: async () => ({ success: true, data: { files: [] } }),
+    getCurrentDirectory: () => 'C:\\proj',
+    fileExists: async () => ({ success: true, data: false }),
+    getPathType: async () => ({ success: true, data: { type: 'not_found' as const } }),
+    createFileExclusive: async (p: string, content: string) => {
+      created.push(p)
+      return { success: true, data: true }
+    },
+  }
+  const gate = createClaimGate({ fs, claimsDir: 'C:\\chill\\scheduled-claims' })
+  assert.equal(await gate.acquire('t-1'), true)
+  assert.equal(created.length, 1)
+  assert.equal(created[0], 'C:\\chill\\scheduled-claims\\t-1.json', '分隔符与目录风格一致')
+  assert.ok(!created[0].includes('/'), '不得出现正斜杠（Shell COM ParseName 对混合形式返 null）')
+
+  // 目录带尾分隔符 → 归一后不产生双分隔符
+  const gate2 = createClaimGate({ fs, claimsDir: 'C:\\chill\\scheduled-claims\\' })
+  assert.equal(await gate2.acquire('t-2'), true)
+  assert.equal(created[1], 'C:\\chill\\scheduled-claims\\t-2.json', '尾分隔符被剥除，无双反斜杠')
+})
+
+test('claimGate：释放与过期复活一律走 hardDeleteFile 硬删（不触碰回收站语义）', async () => {
+  const { fs, hardDeleted, softDeleted } = makeHardDeleteFs()
+  const nowState = { value: T0 }
+  const gate = createClaimGate({ fs, claimsDir: '/claims', now: () => nowState.value, ttlMs: 30 * 60 * 1000 })
+  assert.equal(await gate.acquire('t-1'), true)
+  await gate.release('t-1')
+  assert.deepEqual(hardDeleted, ['/claims/t-1.json'], 'release 走硬删')
+  assert.deepEqual(softDeleted, [], '不再调用 deleteFile（移回收站）')
+
+  assert.equal(await gate.acquire('t-2'), true)
+  nowState.value = T0 + 31 * 60 * 1000
+  const other = createClaimGate({ fs, claimsDir: '/claims', now: () => nowState.value, ttlMs: 30 * 60 * 1000 })
+  assert.equal(await other.acquire('t-2'), true, '过期复活成功')
+  assert.deepEqual(hardDeleted, ['/claims/t-1.json', '/claims/t-2.json'], 'TTL 复活分支同样走硬删')
+  assert.deepEqual(softDeleted, [])
+})
+
+test('claimGate：硬删失败可观测（console.error）；ENOENT=已释放不算失败', async () => {
+  const errors: string[] = []
+  const origErr = console.error
+  console.error = (...args: unknown[]) => { errors.push(args.join(' ')) }
+  try {
+    let mode: 'ok' | 'enoent' | 'busy' = 'ok'
+    const { fs } = makeHardDeleteFs({
+      files: { '/claims/t-1.json': JSON.stringify({ pid: 1, at: T0 }) },
+      hardResult: () =>
+        mode === 'busy'
+          ? { success: false, error: 'EBUSY: resource busy or locked' }
+          : mode === 'enoent'
+            ? { success: false, error: 'ENOENT: no such file or directory' }
+            : { success: true },
+    })
+    const gate = createClaimGate({ fs, claimsDir: '/claims', now: () => T0 })
+
+    mode = 'enoent'
+    await gate.release('t-1')
+    assert.equal(errors.length, 0, 'ENOENT=已释放（幂等），零噪音')
+
+    mode = 'busy'
+    await gate.release('t-1')
+    assert.equal(errors.length, 1, '真失败必须留痕')
+    assert.ok(errors[0].includes('claim 删除失败'), '信息含定位标记')
+
+    // 过期复活分支同款：删不掉 → EEXIST → fail-closed，且失败留痕
+    errors.length = 0
+    const stale = createClaimGate({ fs, claimsDir: '/claims', now: () => T0 + 31 * 60 * 1000, ttlMs: 30 * 60 * 1000 })
+    assert.equal(await stale.acquire('t-1'), false, '删不掉 → 抢占失败（fail-closed）')
+    assert.ok(errors.some((m) => m.includes('claim 删除失败')), '复活分支失败也留痕')
+  } finally {
+    console.error = origErr
+  }
+})

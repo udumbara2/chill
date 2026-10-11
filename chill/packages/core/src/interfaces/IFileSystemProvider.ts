@@ -33,4 +33,9 @@ export interface IFileSystemProvider {
    *  检出，同 statFile 先例；data=true=创建成功，data=false=已存在（EEXIST）；其他失败走
    *  success=false。未实现的宿主由消费方优雅降级（无 claim，乐观判重现状） */
   createFileExclusive?(path: string, content: string): Promise<FileSystemResult<boolean>>
+  /** 硬删（unlink/rm，不过回收站）。可选实现：内部账目清理（定时任务 claim 释放等）专用——
+   *  deleteFile 是面向用户的"可恢复删除"（Windows 走 Shell COM 移回收站），内部清理借用它
+   *  既语义错位又不可验证（退出码 0 ≠ 文件真没了；混合分隔符路径 ParseName 返 null 时静默
+   *  失败——2026-10-11 claim 永久残留根因）。未实现的宿主由消费方退回 deleteFile */
+  hardDeleteFile?(path: string): Promise<FileSystemResult>
 }

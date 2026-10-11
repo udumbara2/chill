@@ -15,7 +15,11 @@ import type { IFileSystemProvider, FileSystemResult, FileReadOptions } from '../
  * 通过 Shell.Application COM 对象实现，跨 Windows 版本兼容
  */
 function moveToRecycleBin(filePath: string): void {
-  const psCommand = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; (New-Object -ComObject Shell.Application).Namespace(0).ParseName('${filePath.replace(/'/g, "''")}').InvokeVerb('delete')`
+  // Shell COM 的 ParseName 对正斜杠/混合分隔符路径返回 null（2026-10-11 claim 残留根因链一环：
+  // claimPathOf 曾拼出 `dir\sub/file.json`，ParseName=null → InvokeVerb 打在 null 上 → 退出码 1
+  // → execSync 抛 → deleteFile 静默转 success:false）。归一为反斜杠后再交给 Shell。
+  const normalized = filePath.replace(/\//g, '\\')
+  const psCommand = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; (New-Object -ComObject Shell.Application).Namespace(0).ParseName('${normalized.replace(/'/g, "''")}').InvokeVerb('delete')`
   const commandBytes = Buffer.from(psCommand, 'utf16le')
   const encodedCommand = commandBytes.toString('base64')
   execSync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`, {
@@ -191,6 +195,21 @@ export class NodeFileSystemProvider implements IFileSystemProvider {
       return {
         success: false,
         error: error instanceof Error ? error.message : '删除文件失败'
+      }
+    }
+  }
+
+  /** 硬删（unlink/rm，不过回收站）：内部账目清理专用原语，见 IFileSystemProvider.hardDeleteFile */
+  async hardDeleteFile(filePath: string): Promise<FileSystemResult> {
+    try {
+      // force:true=不存在视为已删（幂等释放语义）；真删——不借"移回收站"（其成败以退出码论、
+      // 不验证文件消失，内部清理用了它就是静默失败的黑洞）
+      fs.rmSync(filePath, { force: true })
+      return { success: true, data: { path: filePath } }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : '硬删文件失败'
       }
     }
   }

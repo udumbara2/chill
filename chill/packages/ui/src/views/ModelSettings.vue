@@ -480,7 +480,7 @@
                 <p class="settings-page-description">让助手看见并操作你的桌面：截屏感知、UI 元素识别、键鼠操作。</p>
               </div>
             </div>
-            <!-- 桌面能力开关（kvStore 键 desktop_control_enabled，与 CLI /desktop 同一键；opt-in 默认关） -->
+            <!-- 桌面能力开关（kvStore 键 desktop_control_enabled，与 CLI /computer 同一键；opt-in 默认关） -->
             <section class="settings-group">
               <div class="settings-group-head"><h3>桌面能力</h3></div>
               <div class="settings-card settings-card-flush">
@@ -494,7 +494,7 @@
                     <span class="settings-switch-slider"></span>
                   </label>
                 </div>
-                <!-- 操作审计留痕（kvStore 键 desktop_audit，与 CLI /desktop audit 同一键；opt-out 默认开） -->
+                <!-- 操作审计留痕（kvStore 键 desktop_audit，与 CLI /computer audit 同一键；opt-out 默认开） -->
                 <div class="settings-row">
                   <div>
                     <div class="settings-row-label">操作审计留痕</div>
@@ -540,12 +540,12 @@
                 </div>
                 <div class="settings-row">
                   <div style="flex:1">
-                    <div class="settings-row-label">私有 CA 证书路径（wss 必填）</div>
+                    <div class="settings-row-label">私有 CA 证书路径（wss 选填，留空=公共证书）</div>
                     <input v-model="relayConfigForm.caPath" placeholder="C:\path\to\ca.crt" style="width:100%" />
                   </div>
                 </div>
                 <div class="settings-row">
-                  <div class="settings-row-desc">配置存 secureStorage；caFP 由 CA 文件计算（手机扫码时核对）。</div>
+                  <div class="settings-row-desc">配置存 secureStorage；caFP 由 CA 文件计算（手机扫码时核对）；wss 留空 CA=公共证书（Let's Encrypt 等）。</div>
                   <button class="settings-action-button" @click="saveRelayConfig" :disabled="relayBusy">保存配置</button>
                 </div>
               </div>
@@ -565,7 +565,7 @@
                 </div>
                 <div class="settings-row" v-if="relayQrDataUrl">
                   <div style="text-align:center;flex:1">
-                    <img :src="relayQrDataUrl" alt="配对二维码" style="max-width:260px;image-rendering:pixelated" />
+                    <img :src="relayQrDataUrl" alt="配对二维码" style="width:100%;max-width:640px;height:auto" />
                     <div class="settings-row-desc">用手机 chill App 扫码。配对完成后请关闭本卡片（QR 含一次性令牌）。</div>
                   </div>
                 </div>
@@ -839,7 +839,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { eventBus, EVENTS, ModelType, ModelInfo, SecureStorageService, SelectedModelsService, ModelInfoService, modelInfoService, builtInToolExecutor, A2AClient, CozeAgentAdapter, providerManager, deriveModelKind } from '@assistant-ai/core'
 import type { AgentCard, RemoteAgentConfig, AddModelParams } from '@assistant-ai/core'
 import { getHostAPI, tryGetHostAPI } from '../host/hostApi'
-import { listKeySlotDomains, resolveKeySlotId, CONNECT_PARAM_SCHEMA } from '@assistant-ai/core'
+import { listKeySlotDomains, resolveKeySlotId, CONNECT_PARAM_SCHEMA, qrRenderPlan } from '@assistant-ai/core'
 import { useChatResourceStore } from '../stores/chatResourceStore'
 import ModelParameterDialog from '../components/ModelParameterDialog.vue'
 import { IPCKeyValueStore } from '../adapters/IPCKeyValueStore'
@@ -914,8 +914,8 @@ const resetLimits = (): void => {
   evaluatorKv?.removeItem('delegation_max_concurrent')
   evaluatorKv?.removeItem('delegation_max_cumulative')
 }
-// 桌面能力开关（kvStore 键 desktop_control_enabled，opt-in：读不到/'false'=关；与 CLI /desktop 同一键。
-// 切换时注入合成消息显式告知模型工具集变化（对齐 CLI /desktop 文案，kind 'desktopToggle'），
+// 桌面能力开关（kvStore 键 desktop_control_enabled，opt-in：读不到/'false'=关；与 CLI /computer 同一键。
+// 切换时注入合成消息显式告知模型工具集变化（对齐 CLI /computer 文案，kind 'desktopToggle'），
 // 关闭时收回 [s] 会话级放行）
 const desktopControl = ref<boolean>(false)
 const handleDesktopControlChange = () => {
@@ -936,7 +936,7 @@ const handleDesktopControlChange = () => {
   }
 }
 
-// 桌面操作审计留痕开关（kvStore 键 desktop_audit，opt-out：读不到/'true'=开；与 CLI /desktop audit 同一键。
+// 桌面操作审计留痕开关（kvStore 键 desktop_audit，opt-out：读不到/'true'=开；与 CLI /computer audit 同一键。
 // 仅持久化开关：core builtInToolExecutor 现读现生效，UI 侧无需额外动作）
 const desktopAudit = ref<boolean>(true)
 const handleDesktopAuditChange = () => {
@@ -999,11 +999,8 @@ async function saveRelayConfig(): Promise<void> {
       return
     }
     let caFP = ''
-    if (f.relayUrl.startsWith('wss://')) {
-      if (!f.caPath) {
-        relayPairMessage.value = '❌ wss 模式必须提供私有 CA 证书路径'
-        return
-      }
+    // CA 选填（2026-10-11 规划迭代 A）：wss 留空=公共证书——caFP 为空，手机端（新 APK）走系统 CA 信任态
+    if (f.relayUrl.startsWith('wss://') && f.caPath) {
       caFP = (await getHostAPI().relayCaFP(f.caPath)).caFP
     }
     await getPairingManager().saveRelayConfig({
@@ -1027,7 +1024,14 @@ async function startPair(): Promise<void> {
   try {
     const session = await startPairingSession('chill 桌面')
     const { default: QRCode } = await import('qrcode')
-    relayQrDataUrl.value = await QRCode.toDataURL(JSON.stringify(session.qr), { margin: 1, width: 260 })
+    // QR 渲染物理计划单源=core qrRenderPlan（2026-10-11 真机实测教训：含 caCert 的大载荷配对码
+    // 在固定 260px 下模块密度超摄像头可扫范围）；卡片显示预算 640px，宽度随模块数自适应
+    const qrText = JSON.stringify(session.qr)
+    const plan = qrRenderPlan(qrText.length)
+    const qrObj = QRCode.create(qrText, { errorCorrectionLevel: plan.errorCorrectionLevel })
+    const modules = qrObj.modules.size
+    const width = Math.min(640, Math.max(260, modules * plan.pxPerModule))
+    relayQrDataUrl.value = await QRCode.toDataURL(qrText, { margin: plan.margin, width, errorCorrectionLevel: plan.errorCorrectionLevel })
     relayPairMessage.value = '等待手机 redeem…'
     const result = await session.wait()
     relayPairMessage.value = result.message

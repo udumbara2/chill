@@ -166,7 +166,7 @@ export default function SessionSheet({
     <Row key="compact" title="压缩上下文" value={ctx ? ctx.text : s ? '无实测' : '未同步'} warn={ctx?.warn} dimmed={!onOpenCompact} onPress={onOpenCompact} />,
   );
   // 宿主级开关行（目录含该命令且注入入口才渲染——旧桌面目录无此行自动不显示，"不存在而非禁用"）：
-  // 桌面能力=电脑上助手的截屏+键鼠工具集放行；自动切换=自迭代后自动版本切换。与 CLI /desktop、/auto-switch 同源同键
+  // 桌面能力=电脑上助手的截屏+键鼠工具集放行；自动切换=自迭代后自动版本切换。与 CLI /computer、/auto-switch 同源同键
   const desktopEntry = findCatalogCommand(commandCatalog, 'desktop.set');
   if (desktopEntry && onToggleDesktop) {
     findSection('maintain').rows.push(

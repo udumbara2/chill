@@ -335,6 +335,12 @@ export function registerRelayIpc(getMainWindow: () => BrowserWindow | null): voi
     return { caFP: caFingerprint(new Uint8Array(readFileSync(opts.caPath))) }
   })
 
+  // 配对小码规划 R2：CA 文件原始字节 base64 回传（供铸造上传——渲染进程无 fs，UI-only
+  // 配对依赖此通道）；读失败 reject 由渲染层呈现（信任锚不静默降级）
+  ipcMain.handle(IPC_CHANNELS.RELAY_CA_CERT, async (_e, opts: { caPath: string }) => {
+    return { caB64: readFileSync(opts.caPath).toString('base64') }
+  })
+
   ipcMain.handle(
     IPC_CHANNELS.RELAY_TRANSPORT_CONNECT,
     async (_e, opts: { relayUrl: string; mailboxId: string; readToken: string; caPath?: string }) => {

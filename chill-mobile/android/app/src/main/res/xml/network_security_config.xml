@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文放行（2026-10-11 规划迭代 B，F2）：兑现 chill-relay README「在家零成本形态」——
+  家庭局域网 ws:// 中继在 release 包可用。RN 官方 gradle 插件对 release 注入
+  usesCleartextTraffic=false（AgpConfiguratorUtils），NSC 优先级高于 manifest 属性，
+  故经此表放行，不与插件抢 placeholder。
+
+  安全论证（规划 §3）：配对 URL 源于本地持久状态、不受网络影响——攻击者无法把 wss 降级
+  成 ws；明文仅影响主动配对 ws:// 的用户（扫码时配对态有 ⚠ 警示）；端到端消息加密不经
+  传输层。trust-anchors 不设（缺省=系统 CA）——应用自管信任（OkHttp 钉住/系统态）在
+  CaTrustModule，不受本表约束。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

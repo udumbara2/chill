@@ -332,9 +332,9 @@ export default function App() {
 
   const pairStatusText =
     state === 'redeeming'
-      ? '已扫码，正在登记（redeem）…'
+      ? (stateDetail || '已扫码，正在登记（redeem）…')
       : state === 'waiting-confirm'
-        ? '已登记，等待桌面确认配对…'
+        ? (stateDetail || '已登记，等待桌面确认配对…')
         : stateDetail;
 
   // 409 全屏错误（真抢兑检测链的一环）

@@ -66,7 +66,13 @@ export function createDispatch(deps: DispatchDeps): Map<string, Handler> {
   d.set('kv:remove', (key) => { deps.kv.removeItem(String(key)); return null })
 
   // ---------- 安全存储 ----------
-  d.set('store-api-key', (provider, apiKey) => deps.secure.storeApiKey(String(provider), String(apiKey)))
+  // store-api-key 返回形状必须对齐 HostAPI 合同与 electron-main（{success}）：裸布尔会被渲染层
+  // ElectronSecureStorage 读 result.success 得 undefined → 误报「API密钥保存失败」（2026-10-10 实测根因；
+  // 契约测试 store-api-key 形状用例防回归）
+  d.set('store-api-key', async (provider, apiKey) => {
+    const ok = await deps.secure.storeApiKey(String(provider), String(apiKey))
+    return ok ? { success: true } : { success: false, error: 'API Key 保存失败' }
+  })
   d.set('get-api-key', (provider) => deps.secure.getApiKey(String(provider)))
   d.set('delete-api-key', (provider) => deps.secure.deleteApiKey(String(provider)))
   d.set('get-all-providers', () => deps.secure.getAllProviders())
@@ -81,7 +87,7 @@ export function createDispatch(deps: DispatchDeps): Map<string, Handler> {
   d.set('session:delete', (id) => deps.sessions.delete(String(id)))
   // session:watch 由 serve.ts 直接拦截（会话租约换向），不经此表
   d.set('session:loadIfNewer', (id) => deps.sessions.loadIfNewer(String(id)))
-  d.set('session:handoff-id', () => null) // /ui handoff 是 CLI 专属接力语义，web 恒无
+  d.set('session:handoff-id', () => null) // /desktop handoff 是 CLI 专属接力语义，web 恒无
   d.set('project:list', () => deps.sessions.projectList())
   d.set('project:save', (record) => deps.sessions.projectSave(record))
   d.set('project:delete', (id) => deps.sessions.projectDelete(String(id)))

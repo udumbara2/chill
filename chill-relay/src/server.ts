@@ -27,14 +27,20 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, createHash } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Store, DEAD_LETTER_ATTEMPTS } from './store.js';
 import { issueToken, pairStatus, redeem, parseRedeemBody } from './pairing.js';
-import { tokenHash, MAX_WIRE_BYTES, isB64u } from './shared/envelope.js';
+import { tokenHash, MAX_WIRE_BYTES, isB64u, b64uEncode } from './shared/envelope.js';
 
 const MAX_BODY_BYTES = 128 * 1024; // HTTP body 硬上限（边读边掐，超限 413 断连）
 const WS_MAX_PAYLOAD = 96 * 1024;
+/** pairing_ca 材料 decoded 字节帽（规划 R1：防垃圾存储；正常 CA 证书 ≤ 数 KB） */
+const PAIRING_CA_MAX_BYTES = 8 * 1024;
+/** pairing_ca 过期宽限：覆盖「令牌过期后手机仍在重试取材」的窗口 */
+const PAIRING_CA_GRACE_MS = 5 * 60 * 1000;
+/** GET /pair/ca/:fp 的 fp 形状 = b64u(sha256)（43 字符） */
+const PAIRING_CA_FP_RE = /^\/pair\/ca\/([A-Za-z0-9_-]{43})$/;
 
 export interface RateLimits {
   tokensPerMin: number;
@@ -388,8 +394,48 @@ export function createRelayServer(opts: RelayOptions): RelayServer {
       if (method === 'POST' && path === '/pair/tokens') {
         if (bearer(req) !== operatorKey) return json(res, 401, { error: 'unauthorized' });
         if (!limTokens.allow(ip)) return json(res, 429, { error: 'rate_limited' });
+        // 可选 caB64（配对小码·指纹寻址缓存，规划 R1）：base64(CA 文件原始字节)。
+        // fp 由服务端对字节计算（b64u(sha256))——客户端报什么不算数；与 core caFingerprint 同口径。
+        // 空 body 兼容旧客户端（content-length 0 → 无材料上传）。
+        let caB64: string | null = null;
+        if (Number(req.headers['content-length'] ?? '0') > 0) {
+          const body = await readJsonBody(req, res);
+          if (!body.ok) {
+            if (body.reason === 'bad_json') return json(res, 400, { error: 'bad_request' });
+            return; // too_large 已响应
+          }
+          const raw = (body.value as Record<string, unknown>)['caB64'];
+          if (raw !== undefined) {
+            if (typeof raw !== 'string' || raw.length === 0) return json(res, 400, { error: 'bad_request' });
+            let bytes: Buffer;
+            try {
+              bytes = Buffer.from(raw, 'base64');
+            } catch {
+              return json(res, 400, { error: 'bad_request' });
+            }
+            if (bytes.length < 64 || bytes.length > PAIRING_CA_MAX_BYTES) {
+              return json(res, 400, { error: 'bad_request' });
+            }
+            caB64 = raw;
+          }
+        }
         const t = issueToken(store, now);
+        if (caB64 !== null) {
+          const bytes = Buffer.from(caB64, 'base64');
+          store.upsertPairingCa(b64uEncode(createHash('sha256').update(bytes).digest()), caB64, t.expires + PAIRING_CA_GRACE_MS);
+          store.sweepPairingCas(); // 机会主义清扫（随铸造频率，量级极小）
+        }
         return json(res, 200, t);
+      }
+
+      // ---- GET /pair/ca/:fp（配对小码·指纹寻址取材：公开材料内容寻址，无鉴权——
+      //      真伪由手机侧 QR caFP 锚校验；fp=2^256 空间不可枚举；不记含 fp 的日志（防枚举纪律同族））----
+      const caMatch = PAIRING_CA_FP_RE.exec(path);
+      if (method === 'GET' && caMatch) {
+        if (!limStatus.allow(ip)) return json(res, 429, { error: 'rate_limited' });
+        const caB64 = store.getPairingCa(caMatch[1]!);
+        if (caB64 === null) return json(res, 410, { error: 'gone' });
+        return json(res, 200, { caB64 });
       }
 
       // ---- GET /pair/status（Bearer 配对令牌）----

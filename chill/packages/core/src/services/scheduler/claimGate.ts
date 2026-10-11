@@ -13,6 +13,13 @@
  *
  * 优雅降级：宿主 fs 未实现 createFileExclusive（无该原语）→ enabled=false，一切照旧
  * （乐观判重现状）。Node-free（全部经注入）。
+ *
+ * 2026-10-11 根治两处病灶（周期任务"触发一次后永久哑"事故）：
+ * ① claim 路径曾以 `/` 硬拼出混合分隔符（Windows），Shell COM ParseName 返 null 使
+ *   deleteFile（移回收站）静默失败——现路径分隔符与目录统一，且 moveToRecycleBin 侧
+ *   也做了归一（双保险）；
+ * ② claim 释放/复活改走 hardDeleteFile 硬删原语（内部账目不过回收站），失败落
+ *   console.error 可观测——旧版双层吞错零痕迹。
  */
 
 import type { IFileSystemProvider } from '../../interfaces/IFileSystemProvider'
@@ -41,7 +48,13 @@ export interface ClaimGate {
 function claimPathOf(dir: string, taskId: string): string {
   // taskId 由此进程生成（t-<base36>-<rand>），盘上手改的非常规 id 做字符清洗防路径逃逸
   const safe = taskId.replace(/[^a-zA-Z0-9_-]/g, '_')
-  return `${dir}/${safe}.json`
+  // 分隔符与目录风格一致（2026-10-11 根治）：曾用 `/` 硬拼，Windows 上 claimsDir 经 path.join
+  // 为反斜杠 → 混合分隔符路径。Node fs 层两种通吃（抢占/读取/TTL 判定全正常，病极具迷惑性），
+  // 但 Shell COM ParseName 对混合形式返回 null → deleteFile（移回收站）静默失败 → claim 永久
+  // 残留 → 周期任务触发一次后永久哑。全路径统一分隔符，下游任何 API 不再踩这颗雷
+  const sep = dir.includes('\\') ? '\\' : '/'
+  const base = dir.replace(/[\\/]+$/, '')
+  return `${base}${sep}${safe}.json`
 }
 
 export function createClaimGate(deps: ClaimGateDeps): ClaimGate {
@@ -57,6 +70,18 @@ export function createClaimGate(deps: ClaimGateDeps): ClaimGate {
   }
   const fs = deps.fs
   const pathOf = (taskId: string) => claimPathOf(deps.claimsDir, taskId)
+
+  // 内部账目清理一律硬删优先（不过回收站——语义借用错误是 2026-10-11 claim 永久残留事故的
+  // 第二病因）；宿主未实现 hardDeleteFile 时退回 deleteFile。失败必须有可观测痕迹：
+  // 旧版失败被 deleteFile try/catch 与本层无视返回值双重吞掉，零痕迹（ENOENT=已释放不算失败）
+  const removeClaim = async (p: string): Promise<boolean> => {
+    const del = fs.hardDeleteFile ? await fs.hardDeleteFile(p) : await fs.deleteFile(p)
+    if (del && del.success) return true
+    const msg = del?.error ?? ''
+    if (/ENOENT|no such file/i.test(msg)) return true // 不存在=已释放（幂等）
+    console.error(`[claimGate] claim 删除失败（${p}）：${msg || '未知错误'}——残留将阻塞该任务后续触发`)
+    return false
+  }
 
   const acquire = async (taskId: string): Promise<boolean> => {
     const p = pathOf(taskId)
@@ -76,17 +101,18 @@ export function createClaimGate(deps: ClaimGateDeps): ClaimGate {
       }
     }
     if (claimedAt === null || now() - claimedAt < ttlMs) return false
-    // 过期（崩溃残留）：删除后重试一次独占创建——并发夺取者仍只有一个赢
-    await fs.deleteFile(p)
+    // 过期（崩溃残留）：硬删后重试一次独占创建——并发夺取者仍只有一个赢
+    await removeClaim(p)
     const retry = await fs.createFileExclusive!(p, JSON.stringify({ pid: typeof process !== 'undefined' ? process.pid : null, at: now() }))
     return retry.success && retry.data === true
   }
 
   const release = async (taskId: string): Promise<void> => {
     try {
-      await fs.deleteFile(pathOf(taskId))
-    } catch {
-      /* 不存在=已释放 */
+      await removeClaim(pathOf(taskId))
+    } catch (err) {
+      // 旧版这里无声吞掉一切异常——释放失败必须可见，否则残留无任何痕迹
+      console.error('[claimGate] release 异常：', err)
     }
   }
 

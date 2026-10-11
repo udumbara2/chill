@@ -783,7 +783,7 @@ export function refreshSeedMetadata(userCard: ModelInfo, seed?: ModelInfo): void
 
 /**
  * 首个支持视觉的已注册 chat 模型名（桌面能力文案的动态推荐：
- * 系统提示、capture_screen 视觉守卫报错、/desktop 开启提示共用）。
+ * 系统提示、capture_screen 视觉守卫报错、/computer 开启提示共用）。
  * 跳过 deprecated 退役卡（自动/默认路径原则）；一个都没有时返回 undefined，
  * 调用方文案退化为不点名（"请切换到支持视觉的模型"）。
  */

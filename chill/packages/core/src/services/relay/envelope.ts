@@ -609,7 +609,7 @@ export interface CommandStateSnapshot {
   goal: { status: string; objective: string; round: number; maxRounds: number } | null;
   /** 上下文占用（口径 = engine getContextStatus：lastUsage 实测 → 压缩 checkpoint 估值回退；null = 无数据整体隐藏） */
   ctx: { used: number; max?: number; approx?: boolean } | null;
-  /** 宿主级开关：桌面能力（截屏+键鼠注入放行；与 CLI /desktop 同键 desktop_control_enabled） */
+  /** 宿主级开关：桌面能力（截屏+键鼠注入放行；与 CLI /computer 同键 desktop_control_enabled） */
   desktop?: boolean;
   /** 宿主级开关：自迭代后自动版本切换（与 CLI /auto-switch 同键 autoSwitchAfterIteration） */
   autoswitch?: boolean;

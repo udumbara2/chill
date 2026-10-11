@@ -387,6 +387,36 @@ test('modelProxy e2e：代理转发/SSE 流式/CORS/鉴权透传/baseURL 改写'
 
 // ---------- 3. 端到端契约（daemon + ws-host 双端对读） ----------
 
+test('安全存储契约：store-api-key 返回 {success} 形状（对齐 electron-main，防裸布尔回归）', async () => {
+  const root = tempRoot()
+  const { daemon, token } = await startDaemon(5297, root)
+  try {
+    const api = (await import('../../ui/src/host/wsHost')).createWsHost({ token, wsTarget: '127.0.0.1:5297' })
+    await api.ready
+
+    // 渲染层 ElectronSecureStorage 读 result.success——daemon 若回裸布尔，此处得 undefined 误判失败
+    // （2026-10-10 实测根因：WebUI 设置页保存 API Key 必报「保存失败」但数据已落盘）
+    const stored = await api.api.storeApiKey('contract-secure-test', 'sk-contract-1')
+    assert.equal(typeof stored, 'object', `返回必须是对象非裸布尔（实测 typeof=${typeof stored}）`)
+    assert.equal(stored.success, true, `success 标志: ${JSON.stringify(stored)}`)
+
+    // 数据真实落盘 + 回读一致（「报错但已保存」矛盾状态的反向验证）
+    const readback = await api.api.getApiKey('contract-secure-test')
+    assert.equal(readback, 'sk-contract-1', '回读与写入一致')
+
+    // 删除合同 = 裸布尔（与 electron-main 一致，渲染层直接透传）
+    const deleted = await api.api.deleteApiKey('contract-secure-test')
+    assert.equal(deleted, true, '删除返回裸布尔 true')
+    const afterDelete = await api.api.getApiKey('contract-secure-test')
+    assert.equal(afterDelete, null, '删除后回读为 null')
+
+    api.close()
+  } finally {
+    await stopDaemon(daemon)
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('e2e：daemon 与 wsHost 履行同一份合同', async () => {
   const { spawn } = await import('node:child_process')
   const root = tempRoot()

@@ -62,10 +62,6 @@ export interface TuiStatus {
   permissionMode: string
   /** 后台委派任务（活跃任务数 + 最久任务耗时秒；undefined 时该段隐藏） */
   background?: { count: number; longestSec: number }
-  /** 改进提案待确认数（迭代 2 账本段；undefined/0 时该段隐藏） */
-  improvementsPending?: number
-  /** managed 布局（自迭代条件具备 · 闪念捕获迭代 3 模式可见性）：true 显示「自迭代」段 */
-  sourceManaged?: boolean
 }
 
 export interface TuiAppProps {
@@ -81,6 +77,13 @@ export interface TuiAppProps {
   killAllBackgroundTasks: () => Promise<number>
   /** 提问状态（挂起时输入优先路由给提问；单字符选项时启用单键应答） */
   askState: () => { pending: boolean; options?: AskOption[]; allowFreeText: boolean; freeTextHint?: string }
+  /** 配对二维码全屏视图（2026-10-11 TUI 配对原生化；null=无视图。tuiShell 经呈现者槽驱动） */
+  qrState: () => { lines: string[]; cols: number; title: string } | null
+  /** 关闭二维码视图（Esc/q/回车触发；resolve 出码流程的等待） */
+  onQrClose: () => void
+  /** 重绘钩子注册（tuiShell 持有；QR 视图开/关等非模型驱动的 UI 变更经此主动触发重渲染——
+   *  TUI 空闲时无定时器，闭包变量变更不会自动重绘，实测病灶：QR 设了不画、动窗口才出现） */
+  onBumpReady?: (fn: () => void) => void
   /** 改进提案决策面板控制器（迭代 2；undefined 时 /improve 提示不可用） */
   improve?: ImproveController
   /** resize 风暴停手、恢复完整渲染之前调用（全清+重置 Ink 增量状态——
@@ -352,6 +355,10 @@ export function TuiApp(props: TuiAppProps): React.JSX.Element {
 
   useEffect(() => model.subscribe(bump), [model])
   useEffect(() => {
+    props.onBumpReady?.(bump)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
     const onResize = (): void => {
       setResizing(true)
       // 风暴期内 setResizing(true) 是幂等不渲染的——占位帧也要跟随最新尺寸,显式 bump
@@ -374,6 +381,7 @@ export function TuiApp(props: TuiAppProps): React.JSX.Element {
 
   // 单键应答态判定:提问挂起 + 禁止自由文本 + 全部选项标签为单字符
   const ask = props.askState()
+  const qrView = props.qrState()
   const singleKeyAsk =
     ask.pending &&
     !ask.allowFreeText &&
@@ -449,6 +457,11 @@ export function TuiApp(props: TuiAppProps): React.JSX.Element {
     // 改进提案决策面板（迭代 2）：面板接管按键（Ctrl+X 中断仍最高优先；面板打开时不编辑输入行）
     if (improveUi !== null) {
       handleImproveKey(ch ?? '', key)
+      return
+    }
+    // 配对二维码视图（2026-10-11 TUI 配对原生化）：任意关闭键落定等待方（Ctrl+X 中断仍最高优先）
+    if (qrView !== null) {
+      if (key.return || key.escape || (ch != null && ch.toLowerCase() === 'q')) props.onQrClose()
       return
     }
     // 单键应答态:提问等待中 + 单字符选项时,y/n/数字/Esc 直接作答(仅次 Ctrl+X)
@@ -741,8 +754,6 @@ export function TuiApp(props: TuiAppProps): React.JSX.Element {
       (status.frontAgent ? ` | 前台: ${status.frontAgent}` : '') +
       (status.permissionMode === 'fullAccess' ? ' | ⚠ 直写中' : '') +
       (status.background ? ` | 后台: ${status.background.count} (最长 ${status.background.longestSec}s)` : '') +
-      (status.improvementsPending !== undefined && status.improvementsPending > 0 ? ` | 📬改进 ${status.improvementsPending}` : '') +
-      (status.sourceManaged ? ' | ⚙自迭代' : '') +
       (status.planMode ? ' | 规划模式' : '') +
       (status.goalMode ? ` | 目标模式 · 第 ${status.goalMode.roundCount} 轮` : '') +
       (model.follow ? '' : ' | 已暂停跟随 (Ctrl+End 回底)'),
@@ -809,7 +820,7 @@ export function TuiApp(props: TuiAppProps): React.JSX.Element {
   // 根高度 rows-1 使 Ink 走增量路径（带尾部换行），光标 y 直给、无补偿；
   // 该路径写入期间隐藏光标、写完才重现——不产生帧尾↔插入点的振荡鬼影。
   // 输入行与查看器提示行都在帧第 rows-3 行（消息区 rows-3 + 输入/提示 + statusline = rows-1）。
-  if (model.viewerOpen || improveUi !== null) {
+  if (model.viewerOpen || improveUi !== null || qrView !== null) {
     if (searchMode) {
       let w = 0
       for (const c of searchText) w += displayCharWidth(c)
@@ -848,6 +859,33 @@ export function TuiApp(props: TuiAppProps): React.JSX.Element {
           {askPendingText && (
             <Text color="yellow" wrap="truncate">{`${askPendingText} | `}</Text>
           )}
+          <Text dimColor wrap="truncate">{statusLine}</Text>
+        </Box>
+      </Box>
+    )
+  }
+
+  // 配对二维码视图（2026-10-11 TUI 配对原生化）：全屏黑码白底（半块字符正方形模块），
+  // 扫屏幕即配对——不切 CLI、不弹外部窗口；布局仿 improve 面板（全屏替消息区+输入行，statusline 保留）
+  if (qrView !== null) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        <Box flexDirection="column" flexGrow={1} justifyContent="flex-start" alignItems="center" overflow="hidden">
+          <Box marginTop={1}>
+            <Text bold>{qrView.title}</Text>
+          </Box>
+          <Box marginTop={1}>
+            <Box flexDirection="column">
+              {qrView.lines.map((l, i) => (
+                <Text key={i} color="#000000" backgroundColor="#ffffff">{l}</Text>
+              ))}
+            </Box>
+          </Box>
+        </Box>
+        <Box justifyContent="center">
+          <Text dimColor wrap="truncate">{`扫码成功后自动关闭并弹出确认 · Esc / q 手动关闭`}</Text>
+        </Box>
+        <Box>
           <Text dimColor wrap="truncate">{statusLine}</Text>
         </Box>
       </Box>

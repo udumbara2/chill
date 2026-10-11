@@ -10,7 +10,7 @@
 import type * as readline from 'node:readline'
 import { format } from 'node:util'
 import type { ChatEngine, StreamCallback } from '@assistant-ai/core'
-import { MessageRole, SelectedModelsService, getTemplateManager, parseAgentMentions, parseBareAgentMention, eventBus, EVENTS, modelInfoService, getTaskRegistry, cancelAllRunningTasks, getApprovalChannel, getAskChannel, approvalQuestionText, approvalOptions, normalizeApprovalAnswer, getOwnProjectPaths, type ApprovalRequestPayload, type AskRequestPayload, type SubagentTaskEventPayload } from '@assistant-ai/core'
+import { MessageRole, SelectedModelsService, getTemplateManager, parseAgentMentions, parseBareAgentMention, eventBus, EVENTS, modelInfoService, getTaskRegistry, cancelAllRunningTasks, getApprovalChannel, getAskChannel, approvalQuestionText, approvalOptions, normalizeApprovalAnswer, type ApprovalRequestPayload, type AskRequestPayload, type SubagentTaskEventPayload } from '@assistant-ai/core'
 import { consoleAsk, SURFACE_RETRACTED, approvalSettledNotice, askSettledNotice } from '../adapters/consoleAsk.js'
 import { MessageModel, messageContentToText, summarizeToolArgs, userDisplayText } from './messageModel.js'
 import { resolveMediaMentions } from '../adapters/cliMediaAdapter.js'
@@ -20,8 +20,11 @@ import {
   registerAskPresenter,
   registerPrintPresenter,
   registerTodoPresenter,
+  registerQrPresenter,
+  setQrCloser,
   presentDispatch,
   type AskOption,
+  type QrViewPayload,
 } from './tuiState.js'
 import { resyncTodo } from '../todoTracker.js'
 import { isInteractiveCommand, isKnownCommand, isStreamSafeCommand } from './commandMenu.js'
@@ -50,6 +53,14 @@ export interface EnterTuiOpts {
 
 const ALT_SCREEN_ON = '\x1b[?1049h'
 const ALT_SCREEN_OFF = '\x1b[?1049l'
+/** 自动折行关闭（DECAWM off，2026-10-12 重影根治）：全屏帧由渲染器逐行管理，任何一行被
+ *  写宽了都不允许终端自作主张折到下一物理行——那会让 Ink 增量账本与物理屏幕错位
+ *  （后续帧整体位移 + 未变行被跳过不重写 = 同一行显示两遍/提示不消失，直到全量重绘冲掉）。
+ *  行宽三套判定（我方校准表 / Ink string-width / 终端真实渲染）在歧义宽度字符上必然有分歧，
+ *  关折行让超宽行右缘截断（与 noWrap 行语义一致），结构上消灭该类失步；vim/htop 同款纪律。
+ *  不支持 ?7l 的终端静默忽略 = 行为不变（无回归）；退出时恢复折行 */
+const AUTOWRAP_OFF = '\x1b[?7l'
+const AUTOWRAP_ON = '\x1b[?7h'
 /** 鼠标上报：VT200 + SGR 扩展坐标（滚轮以 \x1b[<64/65;列;行M 序列送达 stdin）。
  *  开启后终端内文本选择需按住 Shift 拖选（行业惯例，Claude Code 同） */
 const MOUSE_ON = '\x1b[?1000h\x1b[?1006h'
@@ -76,15 +87,15 @@ function echoStartupLines(): void {
 /** 输入历史：模块级单例，TUI 多次进出（/cli ↔ /tui）间保留 */
 const inputHistory = new InputHistory()
 
-/** 恢复主屏（幂等，进程退出兜底也走这里）；鼠标上报一并关闭 */
+/** 恢复主屏（幂等，进程退出兜底也走这里）；鼠标上报与折行开关一并还原 */
 function leaveAltScreen(): void {
   if (!altScreenActive) return
   altScreenActive = false
-  process.stdout.write(MOUSE_OFF + ALT_SCREEN_OFF)
+  process.stdout.write(MOUSE_OFF + AUTOWRAP_ON + ALT_SCREEN_OFF)
 }
 
 function enterAltScreen(): void {
-  process.stdout.write(ALT_SCREEN_ON + MOUSE_ON)
+  process.stdout.write(ALT_SCREEN_ON + MOUSE_ON + AUTOWRAP_OFF)
   altScreenActive = true
   // 进程退出/SIGINT/SIGTERM 兜底恢复主屏，避免用户终端卡在 alt-screen
   if (exitHooksArmed) return
@@ -154,6 +165,14 @@ export function writeHistoryToScrollback(engine: ChatEngine): void {
   }
   if (out.length > 0) process.stdout.write(out.join('\n') + '\n')
 }
+
+/** QR 全屏视图槽（2026-10-11 TUI 配对原生化）：模块级以便异常退出路径（catch）也能落定等待方；
+ *  TuiApp 经 qrState/onQrClose props 轮询消费 */
+let qrViewData: QrViewPayload | null = null
+let qrCloser: (() => void) | null = null
+/** TuiApp 重绘钩子（onBumpReady 注入）：非模型驱动的 UI 变更（QR 开/关）经此主动触发重渲染——
+ *  TUI 空闲无定时器，闭包变量变更不触发渲染（实测病灶：码设了不画、动窗口才出现） */
+let forceBump: () => void = () => {}
 
 /**
  * 进入 TUI 全屏界面；返回的 Promise 在退出 TUI（/cli）后 resolve。
@@ -570,6 +589,22 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
       })
     })
     registerPrintPresenter((text) => model.addNotice(text))
+    // QR 呈现者（2026-10-11 TUI 配对原生化）：全屏黑码白底视图。开/关都必须 forceBump 主动重绘——
+    // TUI 空闲时无定时器，闭包变量变更不会触发渲染（实测病灶：码设了不画、动窗口才出现）
+    registerQrPresenter((payload: QrViewPayload) =>
+      new Promise<void>((resolve) => {
+        qrViewData = payload
+        qrCloser = () => {
+          qrViewData = null
+          qrCloser = null
+          setQrCloser(null)
+          forceBump()
+          resolve()
+        }
+        setQrCloser(qrCloser) // 程序化关闭槽：扫码成功后 closeQrView() 自动收码
+        forceBump()
+      }),
+    )
     // 任务清单呈现者：活跃期快照进活动区（原位刷新，历史区零噪音）；lines=null 为撤除
     // （落地/删空/会话切换）。落地块不走此通道——最终态经 recorder 入引擎历史，
     // 由 onMessagesChanged → rebuildCommitted 呈现（单一显示通道，无双显）
@@ -751,6 +786,9 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
           const ok = getAskChannel().resolve(ch.id, resolveAskAnswer(text, ch.options, ch.allowFreeText), 'local')
           if (!ok) model.addNotice('（该提问已落定，回答未生效）')
         }
+        // 本地作答即重绘：singleKeyAsk 按键路径不触碰 React 状态，resolve 后也无 notice 事件，
+        // 不主动 bump 的话提示行要等到下一个不相干事件才消失（实测"输完 Y 提示仍在"病灶）
+        forceBump()
         return
       }
       if (askResolver) {
@@ -759,6 +797,7 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
         const freeText = askFreeText
         askResolver = null
         resolve(resolveAskAnswer(text, options, freeText))
+        forceBump()
         return
       }
       const trimmed = text.trim()
@@ -832,6 +871,9 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
       registerAskPresenter(null)
       registerPrintPresenter(null)
       registerTodoPresenter(null)
+      registerQrPresenter(null)
+      qrCloser?.() // 退出 TUI 时若二维码视图仍开着，立即落定等待方
+      qrViewData = null
       removeSubagentListeners()
       restoreConsole()
       engine.setExternalOutputHandler(prevExternalHandler)
@@ -839,7 +881,6 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
       eventBus.off(EVENTS.GOAL_STARTED, goalStartedHandler)
       eventBus.off('chill:switch-progress', commandProgressHandler)
       eventBus.off('chill:command-progress', commandProgressHandler)
-      clearInterval(improvePumpTimer)
       for (const off of channelOffs) off()
       engine.onMessagesChanged = prevOnMessagesChanged
       leaveAltScreen()
@@ -853,11 +894,10 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
       exitResolve()
     }
 
-    // 改进提案决策面板控制器（迭代 2）：/improve 由 TuiApp 本地拦截打开；此处只供给 IO 编排与镜像
+    // 改进提案决策面板控制器（迭代 2）：/improve 由 TuiApp 本地拦截打开；此处只供给 IO 编排
+    // （statusline 镜像已退役——⚙自迭代/📬改进段按用户裁定移除：静态模式指示无信息量，
+    //   改进待决数在桌面 UI/WebUI 有专门显示项，TUI 状态行回归全动态语义）
     const improveController = createImproveController()
-    // 账本 pending 镜像泵（statusline 数据源；30s 惰性对账——mtime 缓存在 core，泵只触发重读）
-    const improvePumpTimer = setInterval(() => { void improveController.pumpMirror() }, 30_000)
-    improvePumpTimer.unref?.()
 
     const statusProvider = (): {
       modelName: string
@@ -869,8 +909,6 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
       contextStatus: { usedTokens: number; maxContextTokens?: number } | null
       permissionMode: string
       background?: { count: number; longestSec: number }
-      improvementsPending?: number
-      sourceManaged?: boolean
     } => {
       const state = engine.getSessionState()
       const currentModelName = SelectedModelsService.getInstance().getCurrentModelName() ?? '未配置'
@@ -900,8 +938,6 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
         background: activeTasks.size > 0
           ? { count: activeTasks.size, longestSec: Math.max(0, Math.floor((Date.now() - longestStartedAt) / 1000)) }
           : undefined,
-        improvementsPending: improveController.pendingMirror() ?? undefined,
-        sourceManaged: getOwnProjectPaths().projectPath !== null,
       }
     }
 
@@ -937,6 +973,11 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
         killAllBackgroundTasks: async () => (await cancelAllRunningTasks()).cancelled,
         statusProvider,
         improve: improveController,
+        qrState: () => qrViewData,
+        onQrClose: () => qrCloser?.(),
+        onBumpReady: (fn: () => void) => {
+          forceBump = fn
+        },
         askState: () => {
           // active = 渠道队列首条与本地槽的先到者（createdAt 序；Map 迭代序即插入序）
           const ch = channelAsks.values().next().value as ChannelAskEntry | undefined
@@ -989,6 +1030,9 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
     registerAskPresenter(null)
     registerPrintPresenter(null)
     registerTodoPresenter(null)
+    registerQrPresenter(null)
+    qrCloser?.()
+    qrViewData = null
     removeSubagentListeners()
     restoreConsole()
     engine.setExternalOutputHandler(prevExternalHandler)

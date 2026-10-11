@@ -625,7 +625,7 @@ function createEngine(): ChatEngine {
     autoCompactEnabled: () => new IPCKeyValueStore().getItem('auto_compact') !== 'false',
     autoCompactThreshold: () => Number(new IPCKeyValueStore().getItem('compact_threshold')) || 0,
     // 桌面能力开关：现读 kvStore 键 desktop_control_enabled，opt-in（读不到/'false'=关），
-    // 与 CLI /desktop 同一 state.json 键（ModelSettings 开关经 kv:set 写入）
+    // 与 CLI /computer 同一 state.json 键（ModelSettings 开关经 kv:set 写入）
     desktopToolsEnabled: () => new IPCKeyValueStore().getItem('desktop_control_enabled') === 'true',
     // goalTick 推进消息的任务清单摘要（与 ModelServiceFactory 的 taskListStoreGetter 同一数据源）
     getTaskStatusSummary: () => useTaskListStore().buildTaskStatusSummary(),

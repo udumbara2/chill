@@ -87,6 +87,11 @@ export class Store {
         deliver_attempts INTEGER NOT NULL,
         dead_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS pairing_ca(
+        fp TEXT PRIMARY KEY,
+        ca_b64 TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
     `);
     // 最小迁移（沿 mailboxes.reads 先例）：老库补 deliver_attempts 列，幂等
     const cols = this.db.prepare('PRAGMA table_info(messages)').all() as { name: string }[];
@@ -285,6 +290,26 @@ export class Store {
     return this.db
       .prepare('DELETE FROM pair_tokens WHERE (used = 0 AND expires < ?) OR (used = 1 AND expires < ?)')
       .run(now - TOKEN_UNUSED_GRACE_MS, now - TOKEN_REDEEMED_GRACE_MS).changes;
+  }
+
+  // ---------- pairing_ca（配对小码·指纹寻址缓存，2026-10-11 规划 R1） ----------
+  /** 内容寻址缓存：fp = b64u(sha256(CA 文件原始字节))；重复铸造同 CA 幂等续期 */
+  upsertPairingCa(fp: string, caB64: string, expiresAt: number): void {
+    this.db
+      .prepare('INSERT INTO pairing_ca(fp, ca_b64, expires_at) VALUES (?, ?, ?) ON CONFLICT(fp) DO UPDATE SET ca_b64=excluded.ca_b64, expires_at=excluded.expires_at')
+      .run(fp, caB64, expiresAt);
+  }
+
+  /** 命中且未过期才回材料；过期/未存 → null（410 语义） */
+  getPairingCa(fp: string): string | null {
+    const r = this.db
+      .prepare('SELECT ca_b64 FROM pairing_ca WHERE fp = ? AND expires_at > ?')
+      .get(fp, this.now()) as { ca_b64: string } | undefined;
+    return r?.ca_b64 ?? null;
+  }
+
+  sweepPairingCas(now: number = this.now()): number {
+    return this.db.prepare('DELETE FROM pairing_ca WHERE expires_at <= ?').run(now).changes;
   }
 
   close(): void {

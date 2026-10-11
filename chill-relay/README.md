@@ -25,7 +25,7 @@ chill-relay            # 本机起服务
 # 桌面 chill → /pair config 填 ws://192.168.x.x:8443 → serve on → 扫码
 ```
 
-⚠ **plain ws 仅限家庭网络/可信内网**。公网部署请配置 TLS，且注意官方手机 APK 钉了官方 CA 指纹——自签证书的 wss 需要重编 APK（源码在公开仓，替换 `res/raw/ca_crt.pem`）。
+⚠ **plain ws 仅限家庭网络/可信内网**（手机端扫码配对时会呈现明文警示）。公网部署请配置 TLS。自签证书的 wss：2026-10-11 之后构建的手机 App **扫码即信任**——桌面 `/pair config` 填上你的 CA 路径，二维码只带指纹（小码、秒扫），证书经本中继的 `/pair/ca/:fp` 端点按指纹锚定送达手机（`/pair/tokens` 铸造时自动缓存，无需手动操作）；Let's Encrypt 等公共证书则 CA 留空即可。旧版 App 仍只认内置官方 CA（源码在公开仓，替换 `res/raw/ca_crt.pem` 重编可解）。
 
 ## 环境变量
 

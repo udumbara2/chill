@@ -36,9 +36,12 @@ chill serve on        # 7×24 常驻宿主（定时任务持钟 + 手机遥控�
 ```
 
 想要**独立桌面窗口**？安装全档包 `npm install -g @assistant-ai/chill`，然后在 REPL 内输入
-`/ui`——Electron 窗口打开并接力当前会话（轻档下 `/ui` 会给出升级指引，其余功能完全一致）。
+`/desktop`——Electron 窗口打开并接力当前会话（轻档下 `/desktop` 会给出升级指引，其余功能完全一致）。
 **手机遥控**：`npm install -g @assistant-ai/chill-relay` 部署自己的中继（详见其 README），
-`/pair config` 配好后 `chill serve on` + 扫码即用。
+`/pair config` 配好后 `chill serve on` + 扫码即用。三种形态全支持：家庭局域网明文 `ws://`
+（扫码时 App 有明文警示）、公网自签证书 wss（`/pair config` 填 CA 路径——**证书经二维码
+里的指纹锚定从你的中继获取，扫码即信任**）、公网 Let's Encrypt wss（CA 一栏留空=公共证书）。
+手机 App 从 GitHub Releases（udumbara2/chill）下载。
 
 常用命令（REPL 内）：
 
@@ -87,6 +90,24 @@ chill serve on        # 7×24 常驻宿主（定时任务持钟 + 手机遥控�
 源码归档为四件套（chill / chill-guardian / chill-relay / chill-mobile），`/fetch-source`
 一次拉齐到 `~/.chill/workspace/`——AI 亦可自迭代手机端（内置技能 mobile-iterate：改码、
 快照固化、构建推送出自己的 APK，需 JDK + Android SDK + 真机）。
+
+### 前置要求：pnpm
+
+`/fetch-source` 下载的源码需在本地「安装依赖 + 编译」后才能运行；本仓库使用 pnpm workspace
+管理（`workspace:*` 协议与 `pnpm-lock.yaml` 为 pnpm 专属，npm/yarn 无法安装），因此需要 pnpm：
+
+```bash
+npm i -g pnpm        # Node ≥22
+npm i -g pnpm@10     # Node 18/20（pnpm 11 要求 Node ≥22）
+```
+
+- 版本要求 **≥10.26**：`pnpm-workspace.yaml` 的 `allowBuilds`（依赖构建脚本白名单）是
+  pnpm 10.26 引入的机制，旧版会静默无视
+- 备选 `corepack enable` 仅适用于 Node ≤24（Node 25 起发行版已移除 corepack），且 Windows
+  需要管理员终端
+- 不装 pnpm 不影响 chill 日常使用，仅无法进入源码自迭代模式
+- electron 二进制默认经 npmmirror 镜像下载（根 package.json `config.electron_mirror`）；
+  npm registry 偏慢时可自行配置 registry 镜像
 
 ## 卸载
 

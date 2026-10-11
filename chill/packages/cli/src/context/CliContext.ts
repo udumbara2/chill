@@ -123,7 +123,7 @@ export class CliContext {
    */
   backupStore!: BackupStore
   desktopController!: NativeDesktopController
-  /** 桌面审计 sink（~/.chill/desktop-audit/ 落盘；/desktop log 经它取今日文件路径） */
+  /** 桌面审计 sink（~/.chill/desktop-audit/ 落盘；/computer log 经它取今日文件路径） */
   desktopAuditSink!: NodeDesktopAuditSink
   /** 实例注册表（多实例互攻防护）：注销函数与兄弟 PID 推送定时器 */
   private unregisterInstance?: () => void

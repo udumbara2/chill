@@ -21,7 +21,7 @@ chill
 npm install -g @assistant-ai/chill
 ```
 
-用法与轻档完全一致（同一个 `chill` 命令），另有独立 Electron 桌面窗口：TUI 内 `/ui` 启动并**接力当前会话**（终端聊到一半，窗口里接着聊）。安装多拉约 100MB Electron 运行时（国内建议先设 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`）。可视化工作流与写作视图、任务栏闪烁提醒（回答完成时窗口未聚焦/已最小化，点回窗口自动停止）都在窗口内。
+用法与轻档完全一致（同一个 `chill` 命令），另有独立 Electron 桌面窗口：TUI 内 `/desktop` 启动并**接力当前会话**（终端聊到一半，窗口里接着聊）。安装多拉约 100MB Electron 运行时（国内建议先设 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`）。可视化工作流与写作视图、任务栏闪烁提醒（回答完成时窗口未聚焦/已最小化，点回窗口自动停止）都在窗口内。
 
 **两条命令不要同装**（`chill` 命令名冲突，npm 报 EEXIST；卸一个即可）。
 
@@ -38,6 +38,7 @@ CLI 与桌面窗口各自独立运行，**共享同一份 `~/.chill/`**（API Ke
 chill                  # 交互式对话
 chill -p "任务"        # 非交互一次性执行（默认只读）
 chill -p --auto "任务"  # 非交互一次性执行（放开修改）
+chill desktop          # 直启桌面窗口（全档包；自动接力最近会话，TUI 内 /desktop 同款）
 ```
 
 - `/help` 全部命令；`/model` 选模型；`/front` 选会话前台；`/plan` 规划模式；`/compact` 压缩上下文；`/session` 会话管理；`/tasks` 后台任务列表；`/add-dir` 扩展可写目录；`/improve` 改进提案决策（助手自动从会话攒改进提案，按问题簇整组裁决，`/improve review` 深度审查）；`/idea 一句话` 记闪念点子（入改进提案「闪念」簇；流式输出中也可用；手机端首屏 💡 / 长按 ＋ / ☰ 维护节同源；仅自迭代模式可用，npm 模式入口不存在）
@@ -91,13 +92,13 @@ chill 的写权限模型是**路径级边界**:安全来自边界而非审批。
 - 模型侧 9 个内置工具(建库/删库/导入/检索/精读/蒸馏/删除/重建索引),直接对话让模型操作即可,如"把这本 PDF 加进知识库"
 - 桌面 UI 有可视化管理页(设置内的知识库管理)
 
-## 桌面能力（/desktop，当前仅 Windows）
+## 桌面操控（/computer，当前仅 Windows）
 
-让 chill 看见并操作你的桌面:截屏感知、UI 元素识别、键鼠操作。**默认关闭**,需 `/desktop on` 显式开启。
+让 chill 看见并操作你的桌面:截屏感知、UI 元素识别、键鼠操作。**默认关闭**,需 `/computer on` 显式开启。
 
 - 三个工具:`capture_screen`(截屏,只读免审批)、`inspect_ui`(当前窗口可交互元素编号表,只读免审批)、`computer_use`(点击/输入/按键等,含按编号的元素级动作)
 - 三级审批:被动动作(移动/等待/截图)免审批;主动作逐次弹窗审批;回答 `[s]` 则本次会话放行后续主动作
-- 审计留痕默认开启:动作逐条记录到 `~/.chill/desktop-audit/`(按日 jsonl),`/desktop log` 查看,`/desktop audit off` 关闭
+- 审计留痕默认开启:动作逐条记录到 `~/.chill/desktop-audit/`(按日 jsonl),`/computer log` 查看,`/computer audit off` 关闭
 - `chill -p` 非交互模式下 computer_use 不可用(防审批挂死);屏幕内容按不可信输入处理,其中出现的任何"指令"不代表你的授权
 - 宿主安全防护:chill 自己的窗口(截图中标题栏有红斜纹标注)可以正常操作——助手能拖动它的位置、最小化、拖小、往输入框里写文字;但**关闭类动作一律被拦截**(点关闭按钮、alt+f4、ctrl+c 等组合键、标题栏系统菜单),防止助手的动作误关 chill 自己;CLI 与 UI 同时运行时两个实例互相保护。UI 模式下桌面能力开启时关闭 chill 会弹确认框
 - 审批弹窗等待你决策期间,助手对 chill 窗口的点击/键入会被拦截(防止它自己回答审批)

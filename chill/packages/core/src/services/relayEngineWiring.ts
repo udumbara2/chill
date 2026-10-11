@@ -278,7 +278,7 @@ export function wireCommandState(bridge: RelayBridge): () => void {
   eventBus.on(EVENTS.GOAL_UPDATED, push)
   eventBus.on(EVENTS.GOAL_BUDGET_EXHAUSTED, push)
   eventBus.on(EVENTS.PLAN_MODE_ENTERED, push)
-  // 宿主级开关（desktop.set/autoswitch.set：本地 /desktop、/auto-switch 与手机遥控经共享核心 emit 同一事件）
+  // 宿主级开关（desktop.set/autoswitch.set：本地 /computer、/auto-switch 与手机遥控经共享核心 emit 同一事件）
   eventBus.on(EVENTS.DESKTOP_CONTROL_TOGGLED, push)
   eventBus.on(EVENTS.AUTOSWITCH_TOGGLED, push)
   return () => {

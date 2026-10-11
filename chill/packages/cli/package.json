@@ -1,6 +1,6 @@
 {
   "name": "@assistant-ai/chill-cli",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "chill — 终端 AI 助手（统一对话引擎、Subagent 委派、MCP、Skill、长期记忆、规划模式）",
   "type": "module",
   "bin": {
@@ -54,7 +54,6 @@
     "@types/hast": "^3.0.4",
     "@types/node": "^20.5.0",
     "@types/qrcode": "^1.5.6",
-    "@types/qrcode-terminal": "^0.12.2",
     "@types/react": "^19.0.0",
     "@types/ws": "^8.18.0",
     "esbuild": "^0.25.0",
@@ -62,7 +61,6 @@
     "ink": "^6.7.0",
     "lowlight": "^3.3.0",
     "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0",
     "react": "^19.0.0",
     "rimraf": "^5.0.0",
     "typescript": "~5.9.3",

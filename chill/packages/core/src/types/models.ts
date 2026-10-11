@@ -148,7 +148,7 @@ export interface Message {
    *   角色"（agent 切换 = 指令集变更；模型切换不标——指令集未变），单行提示，兼作切换轨迹记录。
    * - 'goalTick'：目标模式推进消息（ChatEngine.maybeContinueGoal 构造）——携带评估理由与轮次预算的
    *   自动续跑指令，显示层折叠为一条摘要提示行（同 settledNotice 待遇）。
-   * - 'desktopToggle'：桌面能力开关切换通知（/desktop on|off 时由壳注入）——告知模型
+   * - 'desktopToggle'：桌面能力开关切换通知（/computer on|off 时由壳注入）——告知模型
    *   capture_screen/computer_use 的可用性变化，显示层按提示行渲染原文（同 frontSwitch 待遇）。
    * - 'scheduledTask'：定时任务触发消息（ChatEngine.drainScheduledTasks 构造）——[定时任务 <id>] 信封
    *   + 任务 prompt + 合并补跑标注，显示层折叠为一条摘要提示行（同 goalTick 待遇）。

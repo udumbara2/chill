@@ -138,15 +138,20 @@ async function pickModel(rl: readline.Interface, entries: WizardEntry[]): Promis
   }
 
   let selectedIdx = 0
-  const totalLines = entries.length + 2
+  // 清除距离 = 实际写入行数（N 行列表 + 1 行操作提示）。多算一行 = 每按键净上爬一行、
+  // 逐键吞掉上方内容（图例行→标题行→shell 历史；2026-10-10 真控制台 DSR 光标遥测实证）。
+  const totalLines = entries.length + 1
+  // 整块拼好后单次 write：清除与重画之间、行与行之间不留呈现间隙（消按键闪烁）。
   const renderList = () => {
+    let out = ''
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i]
       const cursor = i === selectedIdx ? '►' : ' '
       const status = e.hasApiKey ? '✓' : '✗'
-      process.stdout.write(`${cursor} ${status} ${e.displayName.padEnd(26)} ${e.provider}\n`)
+      out += `${cursor} ${status} ${e.displayName.padEnd(26)} ${e.provider}\n`
     }
-    process.stdout.write('↑↓ 选择, 回车确认, Esc 跳过\n')
+    out += '↑↓ 选择, 回车确认, Esc 跳过\n'
+    process.stdout.write(out)
   }
   const clearList = () => {
     process.stdout.write(`\x1b[${totalLines}A\x1b[J`)

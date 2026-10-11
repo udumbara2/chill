@@ -93,7 +93,7 @@ export const COMMAND_REGISTRY: CommandSpec[] = [
   { id: 'memory.show', title: '记忆详情', section: 'maintain', presentation: 'console-row', risk: 'instant', channel: 'fast', internal: true },
   { id: 'memory.delete', title: '删除记忆', section: 'maintain', presentation: 'console-row', risk: 'confirm', channel: 'fast', internal: true },
   { id: 'memory.seen', title: '记忆巡检水位', section: 'maintain', presentation: 'console-row', risk: 'instant', channel: 'fast', internal: true },
-  // 宿主级开关（��机遥控桌面 CLI/TUI 的 /desktop、/auto-switch 同源同键；共享核心单一事实点在 desktopControl）：
+  // 宿主级开关（��机遥控桌面 CLI/TUI 的 /computer、/auto-switch 同源同键；共享核心单一事实点在 desktopControl）：
   // desktop.set=confirm（放行键鼠是敏感动作，手机两段式防线）+serial（合成消息注入改会话流，轮末生效不楔在途轮）；
   // autoswitch.set=instant+fast（纯 KV 写不碰引擎串行链——消费点在自迭代收尾，与在途轮语义无涉）
   { id: 'desktop.set', title: '桌面能力', section: 'maintain', presentation: 'console-row', risk: 'confirm', channel: 'serial' },
@@ -488,7 +488,7 @@ const COMMAND_EXECUTORS: Record<string, CommandExecutor> = {
     deps.engine.setPlanMode(args['on'] === true)
     return { ok: true }
   },
-  // 宿主级开关（手机遥控桌面 CLI/TUI 的 /desktop、/auto-switch——共享核心单一事实点在 desktopControl，
+  // 宿主级开关（手机遥控桌面 CLI/TUI 的 /computer、/auto-switch——共享核心单一事实点在 desktopControl，
   // 与 CLI 本地命令同键同源；stdout/视觉模型推荐等呈现留壳）。desktop.set 的可用性探测结果经 data.available 回流
   'desktop.set': async (deps, args) => {
     const port = deps.desktopControl

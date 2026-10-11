@@ -96,7 +96,7 @@ export const EVENTS = {
   ASK_REQUESTED: 'ask-requested', // 通用提问请求（M4e：userInputProvider 全类别请示；载荷 AskRequestPayload）
   ASK_SETTLED: 'ask-settled', // 通用提问落定通告（M4e：载荷 { id, answer, by }；各呈现面据此收摊/置灰）
   PERMISSION_MODE_CHANGED: 'permission-mode-changed', // 权限模式变更（M5：载荷 { mode, by }，by='local'|'phone'；唯一变更通告口，各端据此收敛）
-  DESKTOP_CONTROL_TOGGLED: 'desktop-control-toggled', // 桌面能力开关变更（载荷 { on }；唯一变更通告口——CLI 本地 /desktop 与手机 desktop.set 经 desktopControl 共享核心收敛，relay 桥订阅即时推 cmd.state）
+  DESKTOP_CONTROL_TOGGLED: 'desktop-control-toggled', // 桌面能力开关变更（载荷 { on }；唯一变更通告口——CLI 本地 /computer 与手机 desktop.set 经 desktopControl 共享核心收敛，relay 桥订阅即时推 cmd.state）
   AUTOSWITCH_TOGGLED: 'autoswitch-toggled', // 自迭代后自动版本切换开关变更（载荷 { on }；同上经共享核心收敛）
   TURN_STREAM_CHUNK: 'turn-stream-chunk', // M6 引擎被动流广播：载荷 { sessionId, kind: 'delta'|'reasoning'|'tool', text }；任何轮次（本机/手机发起）都广播，纯广播不落盘；kind=tool 不走本通道（既有 TOOL_CALL_STATUS_CHANGED，不双源）
   HISTORY_INVALIDATED: 'history-invalidated', // M6 非追加式历史变更（regenerate 截断重建）：载荷 { sessionId }；relay 桥据此推 history.invalidated（手机清空该会话副本重拉）
