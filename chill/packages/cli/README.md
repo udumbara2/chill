@@ -41,6 +41,8 @@ chill serve on        # 7×24 常驻宿主（定时任务持钟 + 手机遥控�
 `/pair config` 配好后 `chill serve on` + 扫码即用。三种形态全支持：家庭局域网明文 `ws://`
 （扫码时 App 有明文警示）、公网自签证书 wss（`/pair config` 填 CA 路径——**证书经二维码
 里的指纹锚定从你的中继获取，扫码即信任**）、公网 Let's Encrypt wss（CA 一栏留空=公共证书）。
+同样的三项配置在**桌面 UI 和 Web UI（`chill web`）的设置页「手机」Tab** 也可填写并扫码配对
+（WebUI 页面开着时中继在线，关页自动让位给 CLI/serve——同一把租约锁，谁在线谁跑）。
 手机 App 从 GitHub Releases（udumbara2/chill）下载。
 
 常用命令（REPL 内）：

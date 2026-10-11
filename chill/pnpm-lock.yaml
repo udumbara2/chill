@@ -138,6 +138,9 @@ importers:
       tweetnacl-util:
         specifier: ^0.15.1
         version: 0.15.1
+      ws:
+        specifier: ^8.18.0
+        version: 8.20.1
     devDependencies:
       '@types/js-yaml':
         specifier: ^4.0.9
@@ -145,6 +148,9 @@ importers:
       '@types/node':
         specifier: ^20.19.41
         version: 20.19.41
+      '@types/ws':
+        specifier: ^8.5.10
+        version: 8.18.1
       eslint:
         specifier: ^10.3.0
         version: 10.3.0

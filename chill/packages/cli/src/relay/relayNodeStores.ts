@@ -1,44 +1,20 @@
 /**
  * relayNodeStores.ts — CLI 侧 relay 持久化适配：
- * - FileRelayLockStore：~/.chill/relay.lock（JSON 单行；单用户场景的原子性够用——
- *   写走 tmp+rename，读失败视为无锁；竞态窗口由租约心跳语义兜底，最坏=两端都跑，消息幂等去重）
+ * - FileRelayLockStore：~/.chill/relay.lock——W1 Phase C 起单源 core（tmp+rename 原子写；
+ *   竞态窗口由租约心跳语义兜底，最坏=两端都跑，消息幂等去重）
  * - NodeDeviceStore：~/.chill/relay/devices.json（配对记录）
  */
-import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import type { RelayLockStore, RelayLockState, DeviceStore, PairedDevice } from '@assistant-ai/core'
+import type { DeviceStore, PairedDevice } from '@assistant-ai/core'
+
+export { FileRelayLockStore } from '@assistant-ai/core'
 
 function atomicWriteJson(filePath: string, value: unknown): void {
   mkdirSync(dirname(filePath), { recursive: true })
   const tmp = `${filePath}.tmp-${process.pid}`
   writeFileSync(tmp, JSON.stringify(value), 'utf8')
   renameSync(tmp, filePath)
-}
-
-export class FileRelayLockStore implements RelayLockStore {
-  constructor(private filePath: string) {}
-
-  async read(): Promise<RelayLockState | null> {
-    try {
-      const raw = JSON.parse(readFileSync(this.filePath, 'utf8')) as RelayLockState
-      if (typeof raw.owner !== 'string' || typeof raw.heartbeatAt !== 'number') return null
-      return raw
-    } catch {
-      return null
-    }
-  }
-
-  async write(state: RelayLockState): Promise<void> {
-    atomicWriteJson(this.filePath, state)
-  }
-
-  async remove(): Promise<void> {
-    try {
-      unlinkSync(this.filePath)
-    } catch {
-      /* 不存在即目标态 */
-    }
-  }
 }
 
 export class NodeDeviceStore implements DeviceStore {

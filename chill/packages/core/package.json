@@ -31,11 +31,13 @@
     "openai": "^4.20.1",
     "pdfjs-dist": "^6.2.108",
     "tweetnacl": "^1.0.3",
-    "tweetnacl-util": "^0.15.1"
+    "tweetnacl-util": "^0.15.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.41",
+    "@types/ws": "^8.5.10",
     "eslint": "^10.3.0",
     "eslint-plugin-erasable-syntax-only": "^0.7.1",
     "rimraf": "^5.0.0",

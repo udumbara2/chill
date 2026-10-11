@@ -35,6 +35,7 @@ import { AssetsGateway } from './capabilities/assetsGateway'
 import { DialogsGateway } from './capabilities/dialogsGateway'
 import { SubagentGateway } from './capabilities/subagentGateway'
 import { NodeHookProcessRunner } from '@assistant-ai/core'
+import { RelayGateway } from './relay/relayGateway'
 
 const require = createRequire(import.meta.url)
 /** bundle 目录（dist/serve.js 或 dev 的 src/）——静态资产与 skill 内置目录的锚点 */
@@ -229,6 +230,19 @@ subagents.onToolCallEvent = (payload) => broadcast('subagent-tool-call', payload
 // sessions 目录常驻监听（跨端同步推送；M3.8）
 watchBridge.startSessionsWatch(sessions.getSessionsDir(), sessions)
 
+// ---------- relay 网关（W1《WebUI中继支持》A2：渲染层桥 × daemon I/O——与 electron relayMain 同构） ----------
+// 生命周期挂靠浏览器连接（owner 追踪 + 最后连接双保险）；shutdown 单点收口见下方 shutdown()
+const relayGateway = new RelayGateway({
+  broadcast,
+  hasClients: () => connections.size > 0,
+  lockPath: join(homedir(), '.chill', 'relay.lock'),
+  sessionsDir: sessions.getSessionsDir(),
+  listProjects: async () => ((await sessions.projectList()) as { records?: unknown[] }).records ?? [],
+  isPreview: () => bundleDir.includes('chill-workcopy'),
+})
+relayGateway.registerDispatch(dispatch)
+relayGateway.startCatalogWatch()
+
 // 会话租约（M1.6）：每连接单当前会话；watch 换向即换租约，断连/退出释放
 const leases = new SessionLeases(userDataPath)
 const watchedOf = new Map<WebSocket, string>()
@@ -252,6 +266,16 @@ wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
       ws.send(JSON.stringify(resFrame(frame.id, true, { success: true })))
       return
     }
+    // relay 传输连接特判（W1 D4 owner 追踪：调用方连接即 owner——照 session:watch 特判先例）
+    if (frame.m === 'relay:transport-connect') {
+      try {
+        const r = await relayGateway.transportConnect(ws, frame.a[0] as never)
+        ws.send(JSON.stringify(resFrame(frame.id, true, r)))
+      } catch (err) {
+        ws.send(JSON.stringify(resFrame(frame.id, false, err instanceof Error ? err.message : String(err))))
+      }
+      return
+    }
     const handler = dispatch.get(frame.m)
     if (!handler) {
       ws.send(JSON.stringify(resFrame(frame.id, false, `未知方法：${frame.m}`)))
@@ -268,6 +292,8 @@ wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
     connections.delete(ws)
     const prev = watchedOf.get(ws)
     if (prev) { leases.release(prev, process.pid); watchedOf.delete(ws) }
+    // relay 生命周期挂靠（W1 D4）：owner 断开/最后连接断开 → 关传输+退租（防僵尸锁挡 serve 接管）
+    relayGateway.onClientClose(ws, connections.size === 0)
   })
 })
 
@@ -335,6 +361,7 @@ tryListen(basePort, 10)
 // ---------- 优雅退出（M4.1 退出纪律的先声：注销实例、关连接；Worker 清理随 M4 落地） ----------
 function shutdown(): void {
   unregister()
+  void relayGateway.stop() // relay 退租+关传输（W1：与 CLI/Electron 同一把锁，退出即让位）
   for (const [, id] of watchedOf) { leases.release(id, process.pid) }
   for (const ws of connections) ws.close(1001, 'server shutdown')
   // M4.1 退出纪律：销毁在途 Worker 环境（不留孤儿进程）后再退
