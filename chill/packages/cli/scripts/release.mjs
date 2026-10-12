@@ -116,6 +116,22 @@ function publish(pkgDir, label) {
     console.error(`❌ ${label}：未找到打包产物 ${tgzPath}`);
     process.exit(1);
   }
+  // 断点续跑（2026-10-12 真发布中断事故立）：版本已在暂存区或已上线时，npm stage publish 返回
+  // 两种文案——E409 "Cannot stage previously published version"（已暂存）与
+  // "You cannot publish over the previously published versions"（已上线）——该包已就绪，跳过继续；
+  // 先单独试一发做判定，非已知文案失败仍走下方原重试链。幂等重入：中断→重跑=只补缺的包。
+  const first = spawnSync('npm', ['stage', 'publish', tgzName], {
+    cwd: pkgDir, stdio: 'pipe', encoding: 'utf8', shell: process.platform === 'win32',
+  });
+  if (first.status === 0) {
+    console.log(`\n=== ${label}：npm stage publish → 暂存区（审批走网页 Windows Hello） ===`);
+    console.log((first.stdout || '').trim());
+    return;
+  }
+  if (/Cannot stage previously published version|You cannot publish over the previously published versions/.test(`${first.stdout ?? ''}${first.stderr ?? ''}`)) {
+    console.log(`\n↷ ${label}：版本已在暂存区/已上线——已就绪，跳过（断点续跑）`);
+    return;
+  }
   run('npm', ['stage', 'publish', tgzPath], pkgDir, `${label}：npm stage publish → 暂存区（审批走网页 Windows Hello）`, 4);
 }
 
