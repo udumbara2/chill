@@ -54,15 +54,35 @@ export async function detectFirstRun(): Promise<boolean> {
 /**
  * 掩码读取一行输入（回显 *）。rl 是主 REPL 的共享实例：必须保存原 _writeToOutput
  * 并在 question 回调内恢复，否则此后整个会话的提示符永远显示星号（必修契约）。
+ *
+ * 回显策略 = 全行重绘（2026-10-12 粘贴无反馈根治）：每次 _writeToOutput 一律重画
+ * 「提示词 + N 个星号」（N=当前行缓冲长度，上限 40 防换行）。旧实现按 chunk 分类
+ * （含提示词→打提示词/其余→单星），对逐字符到达（现代终端粘贴/手打）每字符出一星，
+ * 但对 rl.write 整串注入（CLI 的 Ctrl+V 处理器路径：老式 CMD Ctrl 快捷键关闭时
+ * 0x16→readClipboard→rl.write）实测 39 字符只漏出 3 个星——内容已入缓冲区、
+ * 屏幕却"毫无反应"，用户无从判断粘贴是否成功。全行重绘对两条路径一致成立。
  */
 function questionMasked(rl: readline.Interface, prompt: string): Promise<string> {
-  const r = rl as unknown as { _writeToOutput: (s: string) => void }
+  const r = rl as unknown as { _writeToOutput: (s: string) => void; line: string }
   const original = r._writeToOutput.bind(rl)
+  const repaint = (): void => {
+    const stars = '*'.repeat(Math.min(r.line?.length ?? 0, 40))
+    original(`\r\x1b[K${prompt}${stars}`)
+  }
+  let submitted = false
   return new Promise((resolve) => {
     r._writeToOutput = (s: string) => {
-      if (s.includes(prompt)) original(prompt)
-      else if (s === '\r' || s === '\n' || s === '\r\n') original('\n')
-      else original('*')
+      if (submitted) {
+        original(s)
+        return
+      }
+      // 行提交的换行原样放行（并停止重绘，防提交后重画提示词）
+      if (s === '\r' || s === '\n' || s === '\r\n') {
+        submitted = true
+        original('\n')
+        return
+      }
+      repaint()
     }
     rl.question(prompt, (answer) => {
       r._writeToOutput = original
@@ -197,13 +217,35 @@ async function pickModel(rl: readline.Interface, entries: WizardEntry[]): Promis
   }
 }
 
-/** Key 收集双通道：TUI 走 presentAsk 自由文本（TUI 拥有输入权，掩码 readline 不可用，与 /key set 同观感）；CLI 走掩码 */
+/**
+ * Key 收集双通道：TUI 走 presentAsk 自由文本（TUI 拥有输入权，掩码 readline 不可用，与 /key set 同观感）；CLI 走掩码。
+ * 空输入防护（2026-10-12 根治"粘贴静默失败→向导无声退场"）：粘贴在部分 Windows 终端
+ * （老式 CMD）不产生任何可见反馈，用户最常见的下意识动作是直接回车——旧实现把一次
+ * 空回车当"主动跳过"写 dismissed 标记静默退场，用户进 TUI 后才发现 key 没配上、
+ * 模型也没选上（实测复现）。新语义：首次空回车 = 告警 + 重问（附可行动的粘贴指引），
+ * 连续第二次空回车才视为主动跳过。
+ */
 async function askApiKey(rl: readline.Interface, entry: WizardEntry): Promise<string> {
   if (isTuiActive() && hasAskPresenter()) {
     const answer = await presentAsk(`请粘贴 ${entry.displayName}（${entry.provider}）的 API Key（留空取消）: `, undefined, true)
     return (answer ?? '').trim()
   }
-  return questionMasked(rl, '  → 请粘贴 API Key（回车确认，留空取消）: ')
+  let emptyCount = 0
+  for (;;) {
+    const raw = await questionMasked(
+      rl,
+      emptyCount === 0
+        ? '  → 请粘贴 API Key（回车确认，留空取消）: '
+        : '  → 请粘贴 API Key（回车确认，再留空一次将跳过）: '
+    )
+    const key = raw.trim()
+    if (key) return key
+    emptyCount++
+    if (emptyCount >= 2) return ''
+    process.stdout.write(
+      '  ⚠ 未收到任何输入。若刚才是粘贴：部分 CMD 窗口的 Ctrl+V 对程序无效，请改用鼠标右键粘贴（或标题栏右键→编辑→粘贴）——粘贴成功会显示星号。也可手动输入后回车。\n'
+    )
+  }
 }
 
 /**
