@@ -134,12 +134,12 @@ function publish(pkgDir, label) {
     cwd: pkgDir, stdio: 'pipe', encoding: 'utf8', shell: process.platform === 'win32',
   });
   if (first.status === 0) {
-    console.log(`\n=== ${label}：npm stage publish → 暂存区（审批走网页 Windows Hello） ===`);
+    console.log(`\n=== ${label}（实际 ${pkg.version}）：npm stage publish → 暂存区（审批走网页 Windows Hello） ===`);
     console.log((first.stdout || '').trim());
     return;
   }
   if (/Cannot stage previously published version|You cannot publish over the previously published versions/.test(`${first.stdout ?? ''}${first.stderr ?? ''}`)) {
-    console.log(`\n↷ ${label}：版本已在暂存区/已上线——已就绪，跳过（断点续跑）`);
+    console.log(`\n↷ ${label}（实际 ${pkg.version}）：版本已在暂存区/已上线——已就绪，跳过（断点续跑）`);
     return;
   }
   run('npm', ['stage', 'publish', tgzPath], pkgDir, `${label}：npm stage publish → 暂存区（审批走网页 Windows Hello）`, 4);
