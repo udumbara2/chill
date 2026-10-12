@@ -27,6 +27,7 @@ export const COMMAND_MENU: CommandMenuEntry[] = [
   { name: '/workflow', desc: '进入 Workflow 管理模式' },
   { name: '/back', desc: '返回 Auto 模式（结束 MCP/Workflow 管理）' },
   { name: '/key', desc: '管理 API Key（set/list/delete）' },
+  { name: '/setup', desc: '重开首次配置向导（选模型 + 配 API Key；TUI 内全程可用）' },
   { name: '/model', desc: '管理模型选择（list/switch）' },
   { name: '/front', desc: '查看/选择会话前台（/front off 恢复裸模型）' },
   { name: '/tasks', desc: '列出后台任务（运行中带序号；/tasks cancel <序号|taskId> 停单个）' },

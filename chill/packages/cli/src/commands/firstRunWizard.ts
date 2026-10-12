@@ -18,7 +18,20 @@ import {
   deriveModelKind,
   getProviderDocUrl,
 } from '@assistant-ai/core'
-import { isTuiActive, hasAskPresenter, presentAsk } from '../tui/tuiState.js'
+import { isTuiActive, hasAskPresenter, presentAsk, presentPrint } from '../tui/tuiState.js'
+
+/**
+ * 向导上下文输出口径（M2e，2026-10-13 TUI 化）：TUI 活跃时经 presentPrint 进消息区**即时可见**——
+ * dispatch('/setup') 的命令捕获会把直写行压进 captureBuf 直到向导结束才 flush，而取 Key 链接
+ * 恰恰是 Key 卡进行时用户最需要的一行；裸终端路径（presentPrint 无呈现者）回退原样直写，行为不变。
+ */
+function wizardOut(text: string): void {
+  if (isTuiActive()) {
+    if (!presentPrint(text)) process.stdout.write(text) // 呈现者缺席兜底（理论不可达，防御性）
+  } else {
+    process.stdout.write(text)
+  }
+}
 
 /** 向导所需的最小 kv 结构（CliContext 的 FileKeyValueStore 满足；结构化类型避免壳层耦合） */
 export interface WizardKvStore {
@@ -120,22 +133,29 @@ async function buildEntries(): Promise<WizardEntry[]> {
  */
 async function pickModel(rl: readline.Interface, entries: WizardEntry[]): Promise<WizardEntry | null> {
   if (isTuiActive() && hasAskPresenter()) {
-    const answer = await presentAsk(
-      '选择要配置的模型（回车取消）: ',
-      entries.map((e, i) => ({
-        label: String(i + 1),
-        description: `${e.displayName}（${e.provider}）${e.hasApiKey ? '' : '（未配置 Key）'}`,
-      })),
-      true
-    )
-    const trimmed = (answer ?? '').trim()
-    if (!trimmed) return null
-    const idx = Number.parseInt(trimmed, 10)
-    if (Number.isNaN(idx) || idx < 1 || idx > entries.length) {
-      process.stdout.write('无效的选择\n')
-      return null
+    // M2f 无效选择重问（0.0.5 同族陷阱根治）：非空但无效的输入（如用户把卡片当聊天框打字）
+    // 不再静默写 dismissed 退场——提示后重开卡，连续 2 次无效才按取消处理（有界防死循环）；
+    // 空串/Esc 是显式取消手势，维持直接取消。
+    for (let attempt = 1; ; attempt++) {
+      const answer = await presentAsk(
+        attempt === 1
+          ? '选择要配置的模型（回车取消）: '
+          : `无效选择，请重试——输入 1-${entries.length} 的序号或 ↑↓ 选择后回车（留空取消）: `,
+        entries.map((e, i) => ({
+          label: String(i + 1),
+          description: `${e.displayName}（${e.provider}）${e.hasApiKey ? '' : '（未配置 Key）'}`,
+        })),
+        true
+      )
+      const trimmed = (answer ?? '').trim()
+      if (!trimmed) return null
+      const idx = Number.parseInt(trimmed, 10)
+      if (!Number.isNaN(idx) && idx >= 1 && idx <= entries.length) return entries[idx - 1]
+      if (attempt >= 2) {
+        wizardOut('  ⚠ 连续无效输入，已按取消处理——稍后可输入 /setup 重新配置。\n')
+        return null
+      }
     }
-    return entries[idx - 1]
   }
 
   if (!process.stdin.isTTY) {
@@ -144,17 +164,20 @@ async function pickModel(rl: readline.Interface, entries: WizardEntry[]): Promis
       const status = e.hasApiKey ? '✓' : '✗'
       process.stdout.write(`  ${status} ${i + 1}. ${e.displayName.padEnd(26)} ${e.provider}\n`)
     }
-    const answer = await new Promise<string>((resolve) => {
-      rl.question('输入序号选择（回车取消）: ', resolve)
-    })
-    const trimmed = answer.trim()
-    if (!trimmed) return null
-    const idx = Number.parseInt(trimmed, 10)
-    if (Number.isNaN(idx) || idx < 1 || idx > entries.length) {
-      process.stdout.write('无效的选择\n')
-      return null
+    // M2f 同款重问语义（非 TTY 分支）
+    for (let attempt = 1; ; attempt++) {
+      const answer = await new Promise<string>((resolve) => {
+        rl.question(attempt === 1 ? '输入序号选择（回车取消）: ' : `无效选择，输入 1-${entries.length} 的序号（留空取消）: `, resolve)
+      })
+      const trimmed = answer.trim()
+      if (!trimmed) return null
+      const idx = Number.parseInt(trimmed, 10)
+      if (!Number.isNaN(idx) && idx >= 1 && idx <= entries.length) return entries[idx - 1]
+      if (attempt >= 2) {
+        process.stdout.write('  ⚠ 连续无效输入，已按取消处理——稍后可用 /setup 重新配置。\n')
+        return null
+      }
     }
-    return entries[idx - 1]
   }
 
   let selectedIdx = 0
@@ -262,8 +285,8 @@ export async function runFirstRunWizard(opts: WizardOptions): Promise<'configure
     return 'unavailable'
   }
 
-  process.stdout.write('\n┌ 首次使用 · 选一个模型开始\n')
-  process.stdout.write('  （✓ 已配置 Key  ✗ 未配置）\n')
+  wizardOut('\n┌ 首次使用 · 选一个模型开始\n')
+  wizardOut('  （✓ 已配置 Key  ✗ 未配置）\n')
   const picked = await pickModel(opts.rl, entries)
 
   if (!picked) {
@@ -272,10 +295,10 @@ export async function runFirstRunWizard(opts: WizardOptions): Promise<'configure
     return 'dismissed'
   }
 
-  process.stdout.write(`  → 已选 ${picked.displayName}（${picked.provider}）\n`)
+  wizardOut(`  → 已选 ${picked.displayName}（${picked.provider}）\n`)
   const docUrl = getProviderDocUrl(picked.provider)
   if (docUrl) {
-    process.stdout.write(`  → 获取 API Key: ${docUrl}\n`)
+    wizardOut(`  → 获取 API Key: ${docUrl}\n`)
   }
 
   const key = (await askApiKey(opts.rl, picked)).trim()
@@ -288,7 +311,7 @@ export async function runFirstRunWizard(opts: WizardOptions): Promise<'configure
   // 统一落稳定 id（与 /key set 同一入口；未知 provider 走 slug）
   const providerId = providerManager.idFor(picked.provider)
   if (opts.force && await SecureStorageService.hasApiKey(providerId)) {
-    process.stdout.write('  ⚠ 该供应商已有 Key，将覆盖。\n')
+    wizardOut('  ⚠ 该供应商已有 Key，将覆盖。\n')
   }
 
   const ok = await SecureStorageService.storeApiKey(providerId, key)

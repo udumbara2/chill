@@ -49,6 +49,10 @@ export interface EnterTuiOpts {
   /** TUI 直进时分流的启动欢迎内容（banner/入口提示/约束通知，含 ANSI）：
    *  消息区初始行原生渲染 + 退出时补打回主屏 scrollback；/tui 命令再进入时不传 */
   startupLines?: string
+  /** TUI 就绪回调（首启向导触发用，2026-10-13 M1）：render 完成后的同步点调用一次，
+   *  注入本闭包的 dispatchSlashCommand（闭包函数不可外露，经参数供给）。
+   *  仅启动调用点传入（/tui 重进不传）；回调须自兜错误，不 crash TUI。 */
+  afterReady?: (dispatch: (text: string) => Promise<void>) => void
 }
 
 const ALT_SCREEN_ON = '\x1b[?1049h'
@@ -868,6 +872,15 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
       if (process.stdin.isTTY) process.stdin.setRawMode(true)
       restoreKeypressListeners()
       restoreStdinRead()
+      // M2b（2026-10-13）：本地提问槽收口（与渠道提问 handoffChannelAsks 对称）——挂起的
+      // presentAsk 以空串（=取消语义）落定，消费方 await 不再永悬、dispatch 的 while 轮询
+      // 不再永挂。TuiApp 的 /cli 直通不查挂起提问（首启向导中途退出是现实路径），此前
+      // 只交接渠道提问、本地槽被静默丢弃。
+      if (askResolver) {
+        const settle = askResolver
+        askResolver = null
+        settle('')
+      }
       registerAskPresenter(null)
       registerPrintPresenter(null)
       registerTodoPresenter(null)
@@ -1021,12 +1034,22 @@ export async function enterTui(chatService: TuiChatService, opts: EnterTuiOpts):
     process.stdin.resume()
     process.stdin.pause()
 
+    // TUI 就绪回调（M1）：presenters 已注册、首帧已渲染、stdin 管线已重置——此刻一切交互
+    // 机制就位。void 触发不阻塞 await exited；回调内部自兜错误（首启向导触发链）
+    if (opts.afterReady) {
+      try {
+        void opts.afterReady((text: string) => dispatchSlashCommand(text))
+      } catch { /* 回调同步段异常不 crash TUI（异步段由回调自身兜底） */ }
+    }
+
     await exited
   } catch (err) {
     // 异常兜底：清标志/恢复主屏/按来源回程，打印原因后降级到 CLI
     closeSync() // 先闭合同步帧：否则后续恢复序列与提示文本都被冻结不呈现
     restoreKeypressListeners()
     restoreStdinRead()
+    // （M2b 收口仅在 exitTui：askResolver 声明于 try 块内，本兜底路径不可见；
+    //  此处亦无挂起提问——afterReady 未及触发即失败，向导不曾开卡）
     registerAskPresenter(null)
     registerPrintPresenter(null)
     registerTodoPresenter(null)

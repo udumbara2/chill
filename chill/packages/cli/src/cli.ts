@@ -4382,11 +4382,15 @@ async function handleInit(input: string): Promise<void> {
 
 /** /setup：手动重开首次配置向导（force 绕过首用检测与跳过标记；输出直写，TUI 内由消息区捕获） */
 async function handleSetup(): Promise<void> {
+  // M2d（2026-10-13 TUI 化）：保存/恢复先验值——TUI 会话期 suppressPrompt 必须保持 true
+  // （enterTui 前置位），旧实现 finally 无条件置 false 会击穿会话级抑制，此后所有 reprompt
+  // 漏提示符进捕获缓冲；裸终端路径先验=false，恢复后行为与原先逐位一致
+  const prevSuppressPrompt = suppressPrompt
   suppressPrompt = true
   try {
     await runFirstRunWizard({ rl, kv: ctx.keyValueStore, printFinal: (t) => process.stdout.write(t), force: true })
   } finally {
-    suppressPrompt = false
+    suppressPrompt = prevSuppressPrompt
     setPrompt(promptForMode())
     reprompt()
   }
@@ -4811,17 +4815,40 @@ async function handleReplInput(rawLine: string): Promise<void> {
   reprompt()
 }
 
-// ===== 首次使用向导（bootstrap loader）：零 Key 用户首启引导 =====
-// 插入点：banner 已收集、rl.on('line') 尚未注册（REPL 未接管输入）。
-// 条件门求值顺序 = 廉价标志在前、IO 检测在后：交互式 + 非 -p + 无待决 hook 信任询问
-// （向导让路：hook 询问等 TUI、向导等用户、TUI 等向导会三方互锁）+ 未跳过 + 首用（零 Key）。
-// 交互提示由向导直写 stdout（经 startupOut 会被收集进 startupLines 当场不显示）；
-// 最终确认经 startupOut（TUI 消息区持久渲染，--cli 照常打印）。
-if (!printMode && process.stdout.isTTY && !isHookTrustPending() && ctx.keyValueStore.getItem(WIZARD_DISMISSED_KEY) !== 'true') {
-  if (await detectFirstRun()) {
-    await runFirstRunWizard({ rl, kv: ctx.keyValueStore, printFinal: startupOut })
-    // M5.5：首启横幅提示 serve 入口（CLI→Web 主路径的可发现性验收项）
-    startupOut('提示：想要图形界面？运行 chill web，浏览器打开终端打印的地址即可。\n')
+// ===== 首次使用向导（2026-10-13 TUI 化，实施规划 M1/M2a/M3）=====
+// 主路径（wantTui）：不在此预执行——TUI 就绪后经 afterReady→dispatch('/setup') 以 ask 卡呈现。
+// 根因：裸终端粘贴三 regimes 两坑一盲（0.0.5 修补只治标）；TUI 输入行双通道兜底
+// （原生粘贴 + Ctrl+V→程序自读剪贴板），把首启交互收回唯一可信的输入面 = 消灭显示层旁路。
+// 兜底路径（--cli 强制 CLI 显示的 TTY）：裸终端向导照旧（星号回显 + 空输入防护在位）。
+// 定序：TUI 路径在 afterReady 内等 hook 信任询问先落定（「向导让路」语义保持）。
+const wizardGateOpen = !printMode && process.stdout.isTTY && ctx.keyValueStore.getItem(WIZARD_DISMISSED_KEY) !== 'true'
+let startupWizardPending = false
+if (wantTui) {
+  // TTY 下唯一的前置检测（无 hook 让路检查——等待逻辑在 afterReady；检测失败不阻塞启动）
+  if (wizardGateOpen && await detectFirstRun()) startupWizardPending = true
+} else if (wizardGateOpen && !isHookTrustPending() && await detectFirstRun()) {
+  await runFirstRunWizard({ rl, kv: ctx.keyValueStore, printFinal: startupOut })
+  // M5.5：首启横幅提示 serve 入口（CLI→Web 主路径的可发现性验收项）；--cli 裸终端直写
+  startupOut('提示：想要图形界面？运行 chill web，浏览器打开终端打印的地址即可。\n')
+}
+
+/**
+ * 首启向导 TUI 触发回调（M2a/M3）：等 hook 信任询问落定（让路语义；hook 询问自身经
+ * waitForTuiAsk 等 TUI 就位）→ 存活检查（等待窗内 /cli 退出则放弃，防对死会话闭包 dispatch）
+ * → dispatch('/setup')（捕获输出 + ask 卡全链路复用）→ web 提示经 notify（TUI 消息区）。
+ * 一次性：由 cli.ts 闭包标志 startupWizardPending 控制，仅在启动调用点传入（/tui 重进不传）。
+ */
+const firstRunWizardAfterReady = async (dispatch: (text: string) => Promise<void>): Promise<void> => {
+  try {
+    while (isHookTrustPending() && isTuiActive()) {
+      await new Promise((r) => setTimeout(r, 150))
+    }
+    if (!isTuiActive() || isHookTrustPending()) return
+    await dispatch('/setup')
+    notify('提示：想要图形界面？运行 chill web，浏览器打开终端打印的地址即可。\n')
+  } catch (err) {
+    // 触发链自兜底：不 crash TUI；失败未写 dismissed，下次启动按首用语义重试
+    try { notify(`⚠ 首次配置向导异常：${err instanceof Error ? err.message : String(err)}\n`) } catch { /* 静默 */ }
   }
 }
 
@@ -4858,7 +4885,14 @@ if (wantTui) {
   // 与 handleTuiEnter 一致：TUI 期间抑制 REPL 提示符（reprompt 守卫生效的前提）
   suppressPrompt = true
   try {
-    await enterTui(chatService, { rl, startRepl, replStarted: false, startupLines: startupLines.join('') })
+    await enterTui(chatService, {
+      rl,
+      startRepl,
+      replStarted: false,
+      startupLines: startupLines.join(''),
+      // 首启向导触发（M1）：仅在启动调用点传入（/tui 重进不传）；一次性由 startupWizardPending 先行判定
+      ...(startupWizardPending ? { afterReady: firstRunWizardAfterReady } : {}),
+    })
   } finally {
     suppressPrompt = false
     setPrompt(promptForMode())

@@ -49,6 +49,16 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+/** 朴素 semver 比较（a<b 负数 / 相等 0 / a>b 正数）——版本闸落后判定用 */
+function compareVersions(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return (pa[i] ?? 0) - (pb[i] ?? 0);
+  }
+  return 0;
+}
+
 function run(cmd, cmdArgs, cwd, label, retries = 1) {
   console.log(`\n=== ${label} ===`);
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -194,24 +204,36 @@ try {
   const headSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf-8' }).stdout.trim();
   verifySourceTag(version, headSha);
 
-  // 版本一致性闸：四包同版本（依赖拓扑 ①→②→④ 与 tag 归档版本必须一票对齐）；
-  // electron-runtime 例外——版本号与 Electron 引擎对齐（28.x），不跟产品版本线
-  console.log(`\n=== 4/8 版本一致性闸（期望 ${version}） ===`);
-  const versionProbes = [
-    ['packages/native-desktop', join(mono, 'packages', 'native-desktop', 'package.json')],
-    ['packages/chill（壳包）', join(mono, 'packages', 'chill', 'package.json')],
-    ['chill-relay', join(relayDir, 'package.json')],
-  ];
-  for (const [name, p] of versionProbes) {
+  // 版本一致性闸（2026-10-13 起改为「按变更发布」，skill §0.5）：
+  // - chill 壳包与 cli **必须同版**（用户心智=一个产品，依赖拓扑 ②→⑤ 锁步）
+  // - native-desktop / chill-relay 允许**落后**于 cli（未变更不升版——发版时其 stage publish
+  //   必然 409 已发布 → 断点续跑自动跳过）；但**禁止超前**（超前=版本管理错误）
+  // - electron-runtime 例外——版本号与 Electron 引擎对齐（28.x），不跟产品版本线
+  console.log(`\n=== 4/8 版本一致性闸（cli=${version}） ===`);
+  const lockstep = [['packages/chill（壳包）', join(mono, 'packages', 'chill', 'package.json')]];
+  for (const [name, p] of lockstep) {
     const v = JSON.parse(readFileSync(p, 'utf-8')).version;
     if (v !== version) {
-      console.error(`❌ 版本不一致：${name}=${v}，cli=${version}。四包必须同版发布。`);
+      console.error(`❌ 版本不一致：${name}=${v}，cli=${version}。壳包与 cli 必须同版发布。`);
+      process.exit(1);
+    }
+  }
+  const lagOk = [
+    ['packages/native-desktop', join(mono, 'packages', 'native-desktop', 'package.json')],
+    ['chill-relay', join(relayDir, 'package.json')],
+  ];
+  const lagReport = [];
+  for (const [name, p] of lagOk) {
+    const v = JSON.parse(readFileSync(p, 'utf-8')).version;
+    if (v === version) lagReport.push(`${name}=${v}（本轮有变更）`);
+    else if (compareVersions(v, version) < 0) lagReport.push(`${name}=${v}（落后沿用，发版时 409 跳过）`);
+    else {
+      console.error(`❌ 版本超前：${name}=${v} > cli=${version}。未发布过的高版本不许出现在仓库。`);
       process.exit(1);
     }
   }
   const rtVer = JSON.parse(readFileSync(join(mono, 'packages', 'electron-runtime', 'package.json'), 'utf-8')).version;
-  console.log(`版本一致：native-desktop / chill-cli / chill-relay / chill 均 ${version}；electron-runtime ${rtVer}（引擎版本线）`);
-  console.log('版本一致：native-desktop / chill-cli / chill-relay / chill 均 ' + version);
+  console.log(`版本闸通过：cli / chill 均 ${version}；${lagReport.join('；')}；electron-runtime ${rtVer}（引擎版本线）`);
 
   // 本地版本管理产物不得随源码分发（.gitignore 已列，须上游解除追踪；内容含迭代元数据，属无扫描通道）
   if (existsSync(join(mono, '.version.json'))) {
