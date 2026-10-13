@@ -1,6 +1,6 @@
 {
   "name": "@assistant-ai/chill",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "AI 助手全档包：chill CLI 全功能 + Electron 桌面窗口（TUI 内 /desktop 启动，含会话接力）",
   "main": "dist/electron-main.js",
   "bin": {

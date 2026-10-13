@@ -461,3 +461,32 @@ test('e2e：daemon 与 wsHost 履行同一份合同', async () => {
   await new Promise((r) => setTimeout(r, 400))
   rmSync(root, { recursive: true, force: true })
 })
+
+test('wsHost.relayCaFP/relayCaCert 载荷形状（{caPath} 包装；漏包即 daemon readFileSync(undefined)）', async () => {
+  const root = tempRoot()
+  const { daemon, token } = await startDaemon(5299, root)
+  try {
+    const api = (await import('../../ui/src/host/wsHost')).createWsHost({ token, wsTarget: '127.0.0.1:5299' })
+    await api.ready
+
+    // 临时 CA 材料：字节内容任意——本测只钉载荷形状，不验指纹语义
+    const caPath = join(root, 'ca-test.crt')
+    writeFileSync(caPath, '-----BEGIN CERTIFICATE-----\ncontract-shape-pin\n-----END CERTIFICATE-----\n')
+
+    // 经真实 wsHost 适配器以裸字符串参数调用（HostAPI 契约形态）——适配器必须包成 {caPath} 再发
+    // （对齐 electron preload）。2026-10-12 WebUI 配对实测：漏包 → daemon 端 o.caPath=undefined →
+    // readFileSync(undefined) 报 "path must be of type string"，保存配置/出码全断
+    const fp = await api.api.relayCaFP(caPath)
+    assert.equal(typeof fp.caFP, 'string', `caFP 形状: ${JSON.stringify(fp)}`)
+    assert.ok(fp.caFP.length > 10, '指纹非空')
+
+    const cert = await api.api.relayCaCert(caPath)
+    assert.equal(typeof cert.caB64, 'string', `caB64 形状: ${JSON.stringify(cert)}`)
+    assert.ok(cert.caB64.length > 10, '材料非空')
+
+    api.close()
+  } finally {
+    await stopDaemon(daemon)
+    rmSync(root, { recursive: true, force: true })
+  }
+})

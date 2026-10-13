@@ -89,6 +89,24 @@ chill serve on        # 7×24 常驻宿主（定时任务持钟 + 手机遥控�
 随后可让 chill 修改自身源码（修改发生在 workcopy 内，完成后经 `/switch-version` 切换、
 `/discard-version` 放弃）。`/use-self` / `/use-npm` 在自迭代版与 npm 官方版之间切换。
 
+### 自迭代出问题时如何自救（三级逃生）
+
+自迭代改的是自己，坏版本可能连启动都启动不了——逃生通道按「还能不能启动」分级：
+
+1. **新版还能启动**：进入后执行 `/use-npm`（持久切回 npm 官方版，自迭代文件保留、`/use-self`
+   可再切回），或 `/rollback` 回滚到上一个自迭代版本。
+2. **新版起不来**：用逃生旗标强制进官方版（指针不动，本次会话有效）：
+
+   ```bash
+   chill --npm
+   ```
+
+   进入后执行 `/use-npm` 即持久切回。
+3. **最后手段**（旗标也不奏效的极端情况）：手动编辑 `~/.chill/current.json`，把 `"active"`
+   的值从 `"self"` 改成 `"npm"`（或直接删除该文件），下次启动即回官方版。
+
+npm 官方包在整个自迭代过程中不会被改动——原版永远回得去。
+
 源码归档为四件套（chill / chill-guardian / chill-relay / chill-mobile），`/fetch-source`
 一次拉齐到 `~/.chill/workspace/`——AI 亦可自迭代手机端（内置技能 mobile-iterate：改码、
 快照固化、构建推送出自己的 APK，需 JDK + Android SDK + 真机）。

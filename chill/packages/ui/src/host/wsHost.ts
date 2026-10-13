@@ -284,8 +284,10 @@ export function createWsHost(from?: { token?: string; wsTarget?: string }): WsHo
     relayReadFileSlice: (o) => call('relay:read-file-slice', o),
     relayStatFile: (o) => call('relay:stat-file', o),
     relayResolvePath: (o) => call('relay:resolve-path', o),
-    relayCaFP: (p) => call('relay:ca-fp', p),
-    relayCaCert: (p) => call('relay:ca-cert', p),
+    // { caPath } 包装=与 electron preload 同构（daemon 处理器按对象解构 o.caPath）——漏包即
+    // readFileSync(undefined)（2026-10-12 WebUI 配对实测：保存配置/出码报 path undefined）
+    relayCaFP: (p) => call('relay:ca-fp', { caPath: p }),
+    relayCaCert: (p) => call('relay:ca-cert', { caPath: p }),
     relayTransportConnect: (o) => call('relay:transport-connect', o),
     relayTransportClose: () => call('relay:transport-close'),
     onRelayTransportMessage: (cb) => subscribe('relay:transport-message', cb),

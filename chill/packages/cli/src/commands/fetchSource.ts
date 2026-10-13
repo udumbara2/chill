@@ -73,8 +73,9 @@ function getOwnPackageRoot(): string {
 }
 
 /** 读自身版本。读不到 / name 不符时显式抛错——严禁静默兜底 '0.0.0'（无声 404 的排查
- *  代价不值得付第二次）；调用方转为 ok:false 让用户看到明确原因。 */
-function getOwnVersion(): string {
+ *  代价不值得付第二次）；调用方转为 ok:false 让用户看到明确原因。cli.ts 复用门的版本
+ *  透明文案也消费它（export 原因）。 */
+export function getOwnVersion(): string {
   const pkgPath = join(getOwnPackageRoot(), 'package.json')
   let pkg: { name?: unknown; version?: unknown }
   try {
@@ -99,6 +100,66 @@ function candidateUrls(version: string): string[] {
     `${GITEE_REPO}/repository/archive/v${version}.zip`,
     `${GITHUB_REPO}/archive/refs/tags/v${version}.tar.gz`,
   ]
+}
+
+/** ①格式门：HTTP 200 ≠ 是压缩包（Gitee 归档登录墙实测回 44.8KB HTML 网页）。
+ *  魔数与扩展名对账，不符/为空/是网页 → 抛带分类话术的错误（进候选循环换下一源）。 */
+function verifyArchiveFormat(archivePath: string, url: string): void {
+  const lowerUrl = url.toLowerCase()
+  const expectZip = lowerUrl.endsWith('.zip')
+  const expectGzip = lowerUrl.endsWith('.tar.gz') || lowerUrl.endsWith('.tgz')
+  if (!expectZip && !expectGzip) return // .tar 等罕见覆盖格式无 gzip 头，跳过（文档注明）
+  let head: Buffer
+  try {
+    head = readFileSync(archivePath).subarray(0, 2)
+  } catch (e: any) {
+    throw new Error(`下载内容读取失败：${e?.message ?? e}`)
+  }
+  if (head.length < 2) throw new Error('下载到的文件为空')
+  if (head[0] === 0x3c && head[1] === 0x21) {
+    throw new Error('该源返回的是网页而非压缩包（疑似登录墙/防爬）')
+  }
+  const isZip = head[0] === 0x50 && head[1] === 0x4b // PK
+  const isGzip = head[0] === 0x1f && head[1] === 0x8b // 1F 8B
+  if ((expectZip && !isZip) || (expectGzip && !isGzip)) {
+    throw new Error('下载内容文件头与压缩包格式不符')
+  }
+}
+
+/** ②内容门：解压产物形状必须是 chill 源码归档（四件套容器或单仓）——
+ *  形状不对=下错了东西，不许当源码就位。 */
+function verifyExtractedLayout(extractedRoot: string): void {
+  const fourPiece = existsSync(join(extractedRoot, 'chill', 'pnpm-workspace.yaml'))
+  const singleRepo =
+    existsSync(join(extractedRoot, 'package.json')) && existsSync(join(extractedRoot, 'pnpm-workspace.yaml'))
+  if (!fourPiece && !singleRepo) {
+    throw new Error('归档布局不符（非 chill 源码仓库）')
+  }
+}
+
+export interface ProjectDirProbe {
+  usable: boolean
+  /** projectDir 内 packages/cli 的版本（读不到为 null）——就位门对账与复用门透明共用 */
+  cliVersion: string | null
+}
+
+/** ③就位门/复用门共用探针：projectDir 是「可构建的 chill monorepo」（package.json 含
+ *  build:cli——与本文件 runIn(projectDir, 'pnpm build:cli') 调用点同改，脚本改名两处同步）。 */
+export function inspectProjectDir(projectDir: string): ProjectDirProbe {
+  try {
+    const pkg = JSON.parse(readFileSync(join(projectDir, 'package.json'), 'utf-8'))
+    const usable = typeof pkg?.scripts?.['build:cli'] === 'string' && pkg.scripts['build:cli'].length > 0
+    let cliVersion: string | null = null
+    try {
+      const cliPkg = JSON.parse(readFileSync(join(projectDir, 'packages', 'cli', 'package.json'), 'utf-8'))
+      if (typeof cliPkg?.version === 'string' && cliPkg.version) cliVersion = cliPkg.version
+    } catch {
+      /* 版本读不到不影响可用性判定 */
+    }
+    return { usable, cliVersion }
+  } catch {
+    return { usable: false, cliVersion: null }
+  }
 }
 
 /** pnpm 版本门槛：pnpm-workspace.yaml 的 allowBuilds（依赖构建脚本白名单）为 pnpm 10.26.0
@@ -191,15 +252,16 @@ export async function fetchSource(opts: FetchSourceOptions): Promise<FetchSource
   mkdirSync(workspaceDir, { recursive: true })
 
   // 下载 + 解压（已存在时按用户选择处理）
+  // CHILL_SOURCE_URL 显式覆盖时版本号不参与下载地址（candidateUrls 直接返回覆盖地址）；
+  // 否则必须读对且读得出——读错=双源 404，读不出=显式失败，均不再静默兜底 0.0.0
+  // （提升到外层：③就位门的 tag 模式版本对账也要用它）
+  let version = ''
   if (existsSync(projectDir) && opts.onExisting === 'continue') {
     log('复用已存在的源码目录，跳过下载。')
   } else {
     if (existsSync(projectDir)) {
       removeRecursive(projectDir)
     }
-    // CHILL_SOURCE_URL 显式覆盖时版本号不参与下载地址（candidateUrls 直接返回覆盖地址）；
-    // 否则必须读对且读得出——读错=双源 404，读不出=显式失败，均不再静默兜底 0.0.0
-    let version = ''
     if (!process.env.CHILL_SOURCE_URL) {
       try {
         version = getOwnVersion()
@@ -219,18 +281,25 @@ export async function fetchSource(opts: FetchSourceOptions): Promise<FetchSource
           const archivePath = join(tmp, url.endsWith('.zip') ? 'source.zip' : 'source.tar.gz')
           log(`下载源码：${url}`)
           await downloadFile(url, archivePath, DOWNLOAD_TIMEOUT_MS)
+          verifyArchiveFormat(archivePath, url) // ①格式门：200 ≠ 压缩包
           const extractDir = join(tmp, 'extract')
           mkdirSync(extractDir, { recursive: true })
           extractedRoot = await decompressArchive(archivePath, extractDir)
+          verifyExtractedLayout(extractedRoot) // ②内容门：形状=chill 源码归档才认
           break
         } catch (e: any) {
+          // 复位关键：②门在赋值后抛错时 extractedRoot 已带脏值，不复位会误判「已有产物」
+          extractedRoot = null
           errors.push(`${url} → ${e?.message ?? e}`)
+          log(`⚠ ${url}：${e?.message ?? e}（已自动尝试下一源）`)
           // 失败的解压可能留下半成品，清场防污染下一个候选源的同名解压目录
           removeRecursive(join(tmp, 'extract'))
         }
       }
       if (!extractedRoot) {
-        return { ok: false, message: `源码下载失败：\n${errors.join('\n')}\n可用 CHILL_SOURCE_URL 环境变量指定下载地址后重试。` }
+        // override 模式下用户已在用 CHILL_SOURCE_URL，再提示是语义矛盾
+        const hint = process.env.CHILL_SOURCE_URL ? '' : '\n可用 CHILL_SOURCE_URL 环境变量指定下载地址后重试。'
+        return { ok: false, message: `源码下载失败：\n${errors.join('\n')}${hint}` }
       }
       // 四件套容器布局（公开仓 v0.0.2 起）：归档根含 chill/ 子目录与兄弟件——拆到
       // workspace 平铺（chill=monorepo、chill-relay/chill-mobile=自迭代对象、
@@ -283,6 +352,33 @@ export async function fetchSource(opts: FetchSourceOptions): Promise<FetchSource
       log('mobile-push.js 已就位。')
     } else {
       log('警告：包内未找到 mobile-push.js，手机端远程推送将不可用（不影响其他功能）。')
+    }
+  }
+
+  // ③就位门：走到构建前，磁盘事实必须是「可构建的 chill monorepo」——同时覆盖全新下载与
+  // 复用两条路径（复用侧另有 cli.ts 复用门在提问层拦，此处为管线内兜底）。不通过=全清场，
+  // 杜绝「空目录/脏残留被当源码 + pnpm 向上爬到无关 manifest 装了个寂寞」（2026-10-13 事故环 #6/#7）
+  const probe = inspectProjectDir(projectDir)
+  if (!probe.usable) {
+    for (const piece of ['chill', 'chill-relay', 'chill-mobile', 'chill-guardian']) {
+      const p = join(workspaceDir, piece)
+      if (existsSync(p)) removeRecursive(p)
+    }
+    return {
+      ok: false,
+      message: '源码就位校验失败：workspace/chill 缺少 package.json 或 build:cli 脚本（不是可构建的 chill 源码）。已清场，可重新执行 /fetch-source。',
+    }
+  }
+  // 版本对账（tag 模式硬拒）：/fetch-source 的契约=「你正在运行的版本的源码」，不符即失败。
+  // override 模式跳过（用户显式指定 URL=显式意图，本地验证语义）
+  if (version && probe.cliVersion && probe.cliVersion !== version) {
+    for (const piece of ['chill', 'chill-relay', 'chill-mobile', 'chill-guardian']) {
+      const p = join(workspaceDir, piece)
+      if (existsSync(p)) removeRecursive(p)
+    }
+    return {
+      ok: false,
+      message: `归档版本 v${probe.cliVersion} 与当前运行的 chill v${version} 不符——请升级 npm 包后重试（npm i -g @assistant-ai/chill），或检查 tag 指针。已清场。`,
     }
   }
 

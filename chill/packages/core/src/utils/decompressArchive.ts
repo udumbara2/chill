@@ -19,8 +19,10 @@ export async function decompressArchive(archivePath: string, destDir: string): P
   const escapedDest = destDir.replace(/"/g, '\\"')
 
   if (lower.endsWith('.zip')) {
+    // EAP=Stop 必须保留：Expand-Archive 对非 zip 报的是非终止错误，powershell.exe 仍退出码 0——
+    // 不加此前缀会把「解压失败+零产出」洗白成成功（2026-10-13 fetch-source 事故根因环 #3，实测验证）
     const cmd = isWindows
-      ? `powershell -Command "Expand-Archive -Path '${escapedArchive}' -DestinationPath '${escapedDest}' -Force"`
+      ? `powershell -Command "$ErrorActionPreference='Stop'; Expand-Archive -Path '${escapedArchive}' -DestinationPath '${escapedDest}' -Force"`
       : `unzip -o "${escapedArchive}" -d "${escapedDest}"`
     await execDecoded(cmd)
   } else if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz') || lower.endsWith('.tar')) {
@@ -49,8 +51,14 @@ export async function decompressArchive(archivePath: string, destDir: string): P
     throw new Error(`不支持的压缩包格式: ${archivePath}`)
   }
 
-  // 自动穿透：若顶层只有一个子目录且无 SKILL.md
+  // 空结果即抛：合法归档必产出 ≥1 个条目。空 destDir 若被穿透逻辑当有效根返回，
+  // 下游会把「什么都没解出来」洗白成「解压成功」（2026-10-13 fetch-source 事故根因环 #4）
   const entries = readdirSync(destDir)
+  if (entries.length === 0) {
+    throw new Error('解压结果为空（源文件可能不是有效压缩包）')
+  }
+
+  // 自动穿透：若顶层只有一个子目录且无 SKILL.md
   if (entries.length === 1) {
     const singleEntry = join(destDir, entries[0])
     if (statSync(singleEntry).isDirectory() && !existsSync(join(destDir, 'SKILL.md'))) {

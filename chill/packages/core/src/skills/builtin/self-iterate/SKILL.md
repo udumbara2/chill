@@ -107,11 +107,12 @@ pnpm install
 
 编译：
 ```powershell
-pnpm build; pnpm build:cli
+pnpm build:user; pnpm build:cli
 ```
 - working_directory：同上
 - timeout：300000
-- 注意：`pnpm build` 只编译 core + electron，不含 CLI。`pnpm build:cli` 单独编译 CLI 包，生成 `packages/cli/dist/cli.js`，体验窗口和冒烟测试都依赖此文件。
+- 注意：**必须用 `build:user` 而不是 `build`**——`build` 的第一环是 native-desktop 的 cargo 编译，用户机无 Rust 必败（预编译 .node 随仓库旅行，运行时懒加载，无需重编）。`build:user` 编译 core + web + ui + 前端渲染 + electron（跳过 native-desktop），`build:cli` 编译 CLI 包生成 `packages/cli/dist/cli.js`，体验窗口和冒烟测试都依赖此文件。
+- **Rust 边界**：本轮迭代若修改了 `packages/native-desktop/` 的 Rust 源码，重编 `.node` 需要 Rust 工具链——无 Rust 的机器上如实告知用户（安装 rustup 后重试，或调整迭代目标避开原生层），不得静默跳过原生改动。
 
 ## 第六步：读取档案库
 
@@ -126,10 +127,11 @@ pnpm build; pnpm build:cli
 ## 第八步：编译 workcopy
 
 ```powershell
-pnpm build
+pnpm build:user; pnpm build:cli
 ```
 - working_directory：`<workcopy绝对路径>`
 - timeout：300000
+- （同第五步注意：`build:user` 跳过需要 Rust 的 native-desktop，用户机安全）
 
 编译失败时分析错误、修复代码后重新编译，此修复算在 3 次重试限制内。
 

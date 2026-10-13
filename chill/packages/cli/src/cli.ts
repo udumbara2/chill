@@ -24,7 +24,7 @@ import { consoleAsk, SURFACE_RETRACTED } from './adapters/consoleAsk.js'
 import { handlePair, handleRelay, makeAskConfirm } from './relay/pairCommands.js'
 import { runServeControl, taskExists, spawnServeRestartHelper, writeServeAlarm } from './serveControl.js'
 import { resolveMediaMentions } from './adapters/cliMediaAdapter.js'
-import { fetchSource, getWorkspaceProjectDir, isSelfVersionUsable, readPointer, writePointer } from './commands/fetchSource.js'
+import { fetchSource, getOwnVersion, getWorkspaceProjectDir, inspectProjectDir, isSelfVersionUsable, readPointer, writePointer } from './commands/fetchSource.js'
 import { eventBus, EVENTS, SecureStorageService, modelInfoService, providerManager, SelectedModelsService, getSkillRegistry, parseSkillMd, writeInstallMeta, readInstallMeta, gitClone, decompressArchive, downloadFile, getOwnProjectPaths, deriveModelKind, reloadSkillRegistry, memoryStore, memoryDecayScore, improvementProposer, improvementLedger, formatDigestLine, formatEntriesGrouped, parseDecisionInput, summarizeDigest, agentInstructions, getTemplateManager, parseAgentMentions, parseBareAgentMention, getForkManager, getTaskRegistry, getApprovalChannel, getAskChannel, getWriteBoundary, INIT_AGENTS_MD_PROMPT, messageText, getProviderDocUrl, getRecommendedVisionModelName, resolveKeySlotId, listKeySlotDomains, nextKillChordState, cancelAllRunningTasks, executeCancelTask, resolveTaskCancelTarget, approvalQuestionText, normalizeApprovalAnswer, ProjectPersistence, latestSessionIdInDir, type ApprovalRequestPayload, type AskRequestPayload, type BackupEntry, type TurnGroup, type DesktopAuditEntry, type HookEvent, type HookTrustApprovalRequest, type ScheduledTask, type SessionRecord, type FileReceiptPayload, type ChatEngine, watchVersionToken } from '@assistant-ai/core'
 
 import { setDesktopControl, setAutoSwitchFlag, readDesktopEnabled, type DesktopControlDeps } from '@assistant-ai/core'/** Ctrl+K 双击停止全部后台任务的确认窗截止时刻（null = 未上膛；过期惰性判定，无需定时器） */
@@ -2141,9 +2141,54 @@ function handleFetchSource(): void {
     return
   }
 
+  // 复用门（2026-10-13 根治）：目录存在≠源码有效——脏残留（历史失败产物/空目录）不给 [c]，
+  // 只给重新下载/取消；合法旧基版可继续，但亮出版本差（知情选择，与就位门的下载侧硬拒构成闭环）
+  const probe = inspectProjectDir(getWorkspaceProjectDir())
+  if (!probe.usable) {
+    const reason = '检测到源码目录已存在，但不是有效的 chill 源码（可能为历史残留或上次失败产物）。重新下载还是取消?'
+    // TUI 活跃时经 TUI 消息区提问
+    if (isTuiActive() && hasAskPresenter()) {
+      presentAsk(reason, [
+        { label: 'n', description: '取消' },
+        { label: 'r', description: '重新下载' },
+      ], false)?.then((answer) => {
+        if (answer.trim().toLowerCase() === 'r') {
+          start('redownload')
+        } else {
+          process.stdout.write('已取消，未做任何更改。\n')
+          finish()
+        }
+      })
+      return
+    }
+    rl.question('检测到源码目录已存在，但不是有效的 chill 源码（可能为历史残留或上次失败产物）。输入 R 重新下载，其他取消: ', (answer) => {
+      if (answer.trim().toLowerCase() === 'r') {
+        start('redownload')
+      } else {
+        process.stdout.write('已取消，未做任何更改。\n')
+        finish()
+      }
+    })
+    return
+  }
+
+  // 版本透明：现有源码版本 ≠ 运行版本时在提问文案亮出（继续旧基版合法——升级指引即此路径）
+  let versionNote = ''
+  if (probe.cliVersion) {
+    try {
+      const running = getOwnVersion()
+      if (running && running !== probe.cliVersion) {
+        versionNote = `现有源码为 v${probe.cliVersion}，当前运行 v${running}（[r] 可获取对应版本）`
+      }
+    } catch {
+      /* 拿不到运行版本就不亮版本差，不影响主流程 */
+    }
+  }
+  const existingQuestion = `检测到源码目录已存在（~/.chill/workspace/chill）${versionNote ? `。${versionNote}` : ''}。继续构建、重新下载还是取消?`
+
   // TUI 活跃时经 TUI 消息区提问
   if (isTuiActive() && hasAskPresenter()) {
-    presentAsk('检测到源码目录已存在（~/.chill/workspace/chill）。继续构建、重新下载还是取消?', [
+    presentAsk(existingQuestion, [
       { label: 'n', description: '取消' },
       { label: 'c', description: '继续构建' },
       { label: 'r', description: '重新下载' },
@@ -2160,7 +2205,7 @@ function handleFetchSource(): void {
     })
     return
   }
-  rl.question('检测到源码目录已存在（~/.chill/workspace/chill）。输入 C 继续构建，R 重新下载，其他取消: ', (answer) => {
+  rl.question(`${existingQuestion}（输入 C 继续构建，R 重新下载，其他取消）: `, (answer) => {
     const a = answer.trim().toLowerCase()
     if (a === 'c') {
       start('continue')
