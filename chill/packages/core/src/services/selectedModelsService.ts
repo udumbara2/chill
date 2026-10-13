@@ -160,6 +160,16 @@ export class SelectedModelsService {
   public saveCurrentModelName(modelName: string): void {
     try {
       this.getStore().setItem(this.CURRENT_MODEL_KEY, modelName)
+      // 指针即入列（2026-10-14 跨壳断链根治）：CLI 侧（首启向导 / /model switch）只写指针、
+      // 从不写 selected-models；而 UI 聊天下拉列表内容独占读 selected-models——TUI 配好模型
+      // 后打开桌面/Web UI，列表恒空、挂载自动恢复被 availableModels.some() 条件卡死（实测：
+      // 必须去设置页手动启用模型才出现在列表）。收口：写指针时查卡成功则入列
+      // （addSelectedModel 幂等，UI 切换器路径模型必已在列、零副作用）；卡查不到（异常态）
+      // 只写指针，行为不劣于旧版。
+      try {
+        const card = ModelInfoService.getInstance().getModelInfoByName(modelName)
+        if (card) this.addSelectedModel(card)
+      } catch { /* 模型目录不可用：只写指针（旧版行为） */ }
     } catch (error) {
       console.error('保存当前模型失败:', error)
     }

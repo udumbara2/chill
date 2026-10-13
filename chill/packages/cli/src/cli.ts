@@ -24,7 +24,7 @@ import { consoleAsk, SURFACE_RETRACTED } from './adapters/consoleAsk.js'
 import { handlePair, handleRelay, makeAskConfirm } from './relay/pairCommands.js'
 import { runServeControl, taskExists, spawnServeRestartHelper, writeServeAlarm } from './serveControl.js'
 import { resolveMediaMentions } from './adapters/cliMediaAdapter.js'
-import { fetchSource, getOwnVersion, getWorkspaceProjectDir, inspectProjectDir, isSelfVersionUsable, readPointer, writePointer } from './commands/fetchSource.js'
+import { fetchSource, findManualSource, getOwnVersion, getSelfTargetState, getWorkspaceDir, getWorkspaceProjectDir, inspectProjectDir, isSelfVersionUsable, readPointer, writePointer } from './commands/fetchSource.js'
 import { eventBus, EVENTS, SecureStorageService, modelInfoService, providerManager, SelectedModelsService, getSkillRegistry, parseSkillMd, writeInstallMeta, readInstallMeta, gitClone, decompressArchive, downloadFile, getOwnProjectPaths, deriveModelKind, reloadSkillRegistry, memoryStore, memoryDecayScore, improvementProposer, improvementLedger, formatDigestLine, formatEntriesGrouped, parseDecisionInput, summarizeDigest, agentInstructions, getTemplateManager, parseAgentMentions, parseBareAgentMention, getForkManager, getTaskRegistry, getApprovalChannel, getAskChannel, getWriteBoundary, INIT_AGENTS_MD_PROMPT, messageText, getProviderDocUrl, getRecommendedVisionModelName, resolveKeySlotId, listKeySlotDomains, nextKillChordState, cancelAllRunningTasks, executeCancelTask, resolveTaskCancelTarget, approvalQuestionText, normalizeApprovalAnswer, ProjectPersistence, latestSessionIdInDir, type ApprovalRequestPayload, type AskRequestPayload, type BackupEntry, type TurnGroup, type DesktopAuditEntry, type HookEvent, type HookTrustApprovalRequest, type ScheduledTask, type SessionRecord, type FileReceiptPayload, type ChatEngine, watchVersionToken } from '@assistant-ai/core'
 
 import { setDesktopControl, setAutoSwitchFlag, readDesktopEnabled, type DesktopControlDeps } from '@assistant-ai/core'/** Ctrl+K 双击停止全部后台任务的确认窗截止时刻（null = 未上膛；过期惰性判定，无需定时器） */
@@ -115,7 +115,7 @@ let forceCli = false
 let serveMode = false
 {
   const argv = process.argv.slice(2)
-  const usage = '用法: chill [-p|--print] [--auto] [--cli] <任务>\n  -p, --print  非交互一次性执行（默认只读，--auto 放开修改）\n  --cli        强制 CLI 显示（默认 TUI 显示）\n  --serve      无界面常驻宿主（手机遥控后端）\n  serve        常驻宿主控制面：chill serve on|off|status\n  web          启动 Web UI（浏览器打开终端打印的地址）\n  desktop      直启桌面窗口（Electron；全档包，自动接力最近会话）'
+  const usage = '用法: chill [-p|--print] [--auto] [--cli] <任务>\n  -p, --print  非交互一次性执行（默认只读，--auto 放开修改）\n  --cli        强制 CLI 显示（默认 TUI 显示）\n  --version    打印版本并退出（探活/脚本用）\n  --serve      无界面常驻宿主（手机遥控后端）\n  serve        常驻宿主控制面：chill serve on|off|status\n  web          启动 Web UI（浏览器打开终端打印的地址）\n  desktop      直启桌面窗口（Electron；全档包，自动接力最近会话）'
   // D14 控制面首词门控：极早分流（先于 CliContext/引擎构造，毫秒级）——runServeControl 自带退出
   if (argv[0] === 'serve') {
     runServeControl(argv.slice(1))
@@ -133,6 +133,17 @@ let serveMode = false
     // await 观察期真话后退出：既阻断主流程（CliContext/REPL 不装配），又保住退出码语义
     const ok = await launch
     process.exit(ok ? 0 : 1)
+  }
+  // --version：快速出口（fetch-source 探活/外部脚本用）。极早分流照 serve/desktop 先例——
+  // 在 CliContext/引擎/relay 装配之前退出，故探针进程零副作用（不抢租约不连中继）
+  if (argv[0] === '--version' || argv[0] === '-v') {
+    try {
+      process.stdout.write(`${getOwnVersion()}\n`)
+      process.exit(0)
+    } catch (e: any) {
+      process.stderr.write(`无法确定版本: ${e?.message ?? e}\n`)
+      process.exit(1)
+    }
   }
   for (const arg of argv) {
     if (arg === '-p' || arg === '--print') {
@@ -242,16 +253,11 @@ eventBus.on('chill:switch-succeeded', (payload: any) => {
   localSwitchInitiated = true
   // M1.6：接续窗统一收敛到本订阅器——发起壳=CLI/TUI → 先开新窗（先开后退，零感知接替）；
   // 发起壳=serve → 不开窗（serveVersionSwitchExit 走自退+小助手拉起）；-p 一次性形态无窗可续。
-  // 三处历史 spawn（core executor / 手动切换 4386 / 回滚 2734）全部收敛于此，双窗风险消除。
+  // 三处历史 spawn（core executor / 手动切换 / 回滚）全部收敛于此，双窗风险消除。
   if (!serveMode && !printMode && projectPaths.projectPath !== null) {
-    const guardianPath = join(projectPaths.parentDir, 'chill-guardian', 'switcher.js')
-    if (existsSync(guardianPath)) {
-      spawn('node', [guardianPath, '--launch', projectPaths.projectPath], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true
-      }).unref()
-    }
+    // 接替式交接（cwd 继承本窗 + 会话续载 hint）——弃用 switcher --launch（其强制 cwd: parentDir，
+    // npm 用户布局下新窗 cwd=workspace 错位）；开发机行为不变或更优（其 cwd 惯例=父目录）
+    spawnChillWindow(projectPaths.projectPath, process.cwd(), chatService.getSessionId())
   }
   // M1.3：serve 发起路径——5s 告别缓冲后优雅自退（小助手拉起新版本）
   if (serveMode) {
@@ -497,6 +503,27 @@ const chatService = new CliChatService(ctx, rl, sessionService.store, serveMode 
 // （启动时历史/目标等状态本就为空，此处调用语义与 /session new 一致、无副作用差异）
 chatService.startNewSession()
 
+// M1b 会话续载（接收端）：接替/换版续窗消费一次性提示文件恢复对话。体验窗一票跳过（防把正式
+// 会话载入 .preview-sessions 布局）；workdir 不匹配/损坏/会话已删→静默保持新会话（=既有行为，
+// 横幅提示 /session load 仍可用）。消费即删，不留残。
+if (!sessionService.isPreview) {
+  try {
+    const hintPath = join(ctx.pathProvider.getUserDataPath(), 'handoff-resume.json')
+    if (existsSync(hintPath)) {
+      const hint = JSON.parse(readFileSync(hintPath, 'utf8')) as { sessionId?: unknown }
+      unlinkSync(hintPath)
+      const sid = typeof hint.sessionId === 'string' ? hint.sessionId : null
+      const record = sid ? await sessionService.loadRecord(sid) : null
+      if (record && record.workdir === process.cwd()) {
+        await chatService.reloadSession(record.id)
+        startupOut('（已接续交接前的对话）\n')
+      }
+    }
+  } catch {
+    /* 提示文件损坏/读取失败：保持新会话（现状降级） */
+  }
+}
+
 // ===== M1（多会话并行规划）：serve 形态的 registry 多会话宿主 =====
 // serve 分支经 ServeSessions 多引擎（core SessionRegistry + 注入共享 scheduler 的 serve 工厂）；
 // chatService 引擎在 serve 退位闲置（空会话、内存可忽略、scheduler 零接线）。交互 CLI 不构造（单引擎语义不变）。
@@ -673,14 +700,8 @@ if (!serveMode && !printMode && !sessionService.isPreview && projectPaths.projec
   const bystanderSucceed = (): void => {
     if (bystanderArmed) return
     bystanderArmed = true
-    const guardianPath = join(projectPaths.parentDir, 'chill-guardian', 'switcher.js')
-    if (existsSync(guardianPath)) {
-      spawn('node', [guardianPath, '--launch', projectPaths.projectPath!], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true
-      }).unref()
-    }
+    // 接替式交接同款（cwd 继承本窗；不写会话 hint——只有发起窗写，旁观续窗新会话=接受级降级）
+    spawnChillWindow(projectPaths.projectPath!, process.cwd())
     bystanderToast('\nℹ 本窗口将在 5 秒后自动接替为新版本（新窗口已打开）...')
     setTimeout(() => { void destroyWorkersBeforeExit().finally(() => process.exit(0)) }, 5000)
   }
@@ -2095,9 +2116,48 @@ async function handleLine(input: string): Promise<void> {
   }
 }
 
-/** /fetch-source：显式确认后下载源码到 ~/.chill/workspace/ 并构建，成功后写指针（失败可重入） */
+/** 接替窗启动器：自写交接 BAT（chcp 65001 防 CJK 乱码 / @cd /d 继承旧窗 cwd=会话续载与相对路径的
+ *  地基 / @pause 启动失败留窗可诊断），经 cmd start 拉起可见新窗。弃用 switcher --launch（其强制
+ *  cwd: parentDir=workspace——M1b workdir 校验将结构性失效 + 用户相对路径错位；开发机未暴露只因
+ *  父目录恰为工作目录）。resumeSessionId 非空时先写一次性提示文件——顺序铁则：hint 必须先于
+ *  spawn 落盘（先开后退意味着新窗可能在旧窗写文件前启动消费，错序=竞态性断链）。 */
+function spawnChillWindow(targetPath: string, cwd: string, resumeSessionId?: string | null): boolean {
+  try {
+    const cliJs = join(targetPath, 'packages', 'cli', 'dist', 'cli.js')
+    if (!existsSync(cliJs)) return false
+    const userDataDir = ctx.pathProvider.getUserDataPath()
+    if (resumeSessionId) {
+      writeFileSync(join(userDataDir, 'handoff-resume.json'), JSON.stringify({ sessionId: resumeSessionId }), 'utf8')
+    }
+    const batPath = join(userDataDir, 'handoff.bat')
+    writeFileSync(batPath, `@chcp 65001 >nul\r\n@cd /d "${cwd}"\r\n@node "${cliJs}"\r\n@pause\r\n`, 'utf8')
+    spawn('cmd', ['/c', 'start', '""', batPath], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 接替收尾：等待在途轮次（fetch 构建期间手机发起的轮次可能仍在跑，直接退出=杀轮次——照旁观窗
+ *  trySucceed 轮询先例）后退租退出；60s 硬上限防挂死，超时退出由 relay at-least-once+notice 兜底。 */
+function scheduleHandoffExit(): void {
+  const deadline = Date.now() + 60_000
+  const tryExit = (): void => {
+    const busy = chatService.getEngine().getSessionState().isRunning
+    if (!busy || Date.now() >= deadline) {
+      void destroyWorkersBeforeExit().finally(() => process.exit(0))
+      return
+    }
+    setTimeout(tryExit, 2000)
+  }
+  setTimeout(tryExit, 3000)
+}
+
+/** /fetch-source：显式确认后下载源码到 ~/.chill/workspace/ 并构建，成功后写指针（失败可重入）；
+ *  成功即接替式交接——拉起源码模式新窗（续同一会话），本窗等在途轮次收尾后退场 */
 function handleFetchSource(): void {
   suppressPrompt = true
+  let handingOff = false
   const finish = () => {
     suppressPrompt = false
     isChatting = false
@@ -2107,9 +2167,20 @@ function handleFetchSource(): void {
   const start = (onExisting: 'continue' | 'redownload') => {
     isChatting = true
     fetchSource({ log: (m) => process.stdout.write(m + '\n'), onExisting })
-      .then((result) => process.stdout.write(result.message + '\n'))
+      .then((result) => {
+        if (result.ok && !printMode && !serveMode && spawnChillWindow(getWorkspaceProjectDir(), process.cwd(), chatService.getSessionId())) {
+          handingOff = true
+          isChatting = false // 释放轮次判定；suppressPrompt 保持 true（本窗不再 reprompt）
+          notify('\n✓ 自迭代环境就绪，已为你打开自迭代窗口（本窗口即将自动退出，对话在新窗口继续）。\n')
+          scheduleHandoffExit()
+          return
+        }
+        process.stdout.write(result.message + '\n')
+      })
       .catch((e: any) => process.stdout.write(`fetch-source 失败：${e?.message ?? e}\n可重新输入 /fetch-source 重试。\n`))
-      .finally(finish)
+      .finally(() => {
+        if (!handingOff) finish()
+      })
   }
 
   if (!existsSync(getWorkspaceProjectDir())) {
@@ -4595,6 +4666,7 @@ async function handleKey(input: string): Promise<void> {
 const R = '\x1b[0m'
 const D = '\x1b[2m'
 const BANNER_COLOR = '\x1b[38;5;67m'
+const NUDGE_COLOR = '\x1b[33m' // 黄色：手动兜底包唤醒等需要注意的启动提示
 const chars = {
   C: [' ███ ','█   █','█    ','█   █',' ███ '],
   H: ['█   █','█   █','█████','█   █','█   █'],
@@ -4607,6 +4679,13 @@ for (let r = 0; r < 5; r++) {
   startupOut(`  ${BANNER_COLOR}${row}${R}\n`)
 }
 startupOut(`\n${D}  直接输入开始 · /help 查看全部命令${R}\n`)
+// 手动兜底包唤醒（2026-10-14）：workspace 躺着用户手动放的源码 zip（GitHub 失败的兜底路线），
+// 但用户可能下载期间关了 chill——重开时主动提醒，防止「忘了回来」断链。仅 npm 模式且 zip 在场才打印
+try {
+  if (getOwnProjectPaths().projectPath === null && findManualSource(getWorkspaceDir())) {
+    startupOut(`${NUDGE_COLOR}  检测到手动放置的源码包（workspace 里的 zip）——输入 /fetch-source 继续安装${R}\n`)
+  }
+} catch { /* 探测失败不影响启动 */ }
 // AGENTS.md 约束加载提示：全局（~/.chill）+ 当前工作目录，存在才打印（与 /session load 一行摘要同范式）
 try {
   const activeFiles = await agentInstructions.listActiveFiles(process.cwd())
@@ -4633,7 +4712,10 @@ async function handleReplInput(rawLine: string): Promise<void> {
   if (input === '/switch-version') {
     const projectPath = projectPaths.projectPath
     if (projectPath === null) {
-      process.stdout.write('当前为 npm 模式（源码未安装），无法切换版本。输入 /fetch-source 可开启自迭代。\n')
+      // 指针就绪时不再误导"请 /fetch-source"（磁盘事实现查；只引导不充当身份）
+      process.stdout.write(getSelfTargetState().ready
+        ? '自迭代环境已就绪，新开 chill 窗口即进入（当前 npm 窗口不参与切换）。\n'
+        : '当前为 npm 模式（源码未安装），无法切换版本。输入 /fetch-source 可开启自迭代。\n')
       setPrompt(promptForMode())
       reprompt()
       return
@@ -4730,7 +4812,9 @@ async function handleReplInput(rawLine: string): Promise<void> {
 
   if (input === '/discard-version') {
     if (projectPaths.projectPath === null) {
-      process.stdout.write('当前为 npm 模式（源码未安装），没有可放弃的自迭代版本。\n')
+      process.stdout.write(getSelfTargetState().ready
+        ? '自迭代环境已就绪但当前为 npm 窗口，无待放弃的 workcopy。如需放弃自迭代环境：新开窗口后执行 /use-npm。\n'
+        : '当前为 npm 模式（源码未安装），没有可放弃的自迭代版本。\n')
       setPrompt(promptForMode())
       reprompt()
       return

@@ -545,7 +545,7 @@
                   </div>
                 </div>
                 <div class="settings-row">
-                  <div class="settings-row-desc">配置存 secureStorage；caFP 由 CA 文件计算（手机扫码时核对）；wss 留空 CA=公共证书（Let's Encrypt 等）。</div>
+                  <div class="settings-row-desc">配置存 secureStorage；wss 留空=公共证书（Let's Encrypt，有域名者推荐，无需任何 CA 文件）。ca.crt 由中继运营者提供（自建=服务器 gen-certs.sh 生成后拷回本机；搭伙=向运营者索取），放本机任意位置后路径填这里；caFP 由文件内容计算（手机扫码时核对）。</div>
                   <button class="settings-action-button" @click="saveRelayConfig" :disabled="relayBusy">保存配置</button>
                 </div>
               </div>
@@ -999,6 +999,13 @@ async function saveRelayConfig(): Promise<void> {
       return
     }
     let caFP = ''
+    // 重影防呆（2026-10-14）：路径含多个盘符=粘贴残留拼接的典型形态——输入框粘贴后只显示
+    // 字符串尾部，双拼串的尾 28 字符恰好等于完整路径，用户自认干净（实测事故）。与其让
+    // ENOENT 报双拼串让用户发懵，不如就地展示完整值，秒级自诊断。
+    if (/[a-zA-Z]:[\\/].*[a-zA-Z]:/.test(f.caPath)) {
+      relayPairMessage.value = `❌ 证书路径疑似重影（含多个盘符）——输入框实际值：${f.caPath}\n请全选删空（Ctrl+A → Delete）后重新粘贴。`
+      return
+    }
     // CA 选填（2026-10-11 规划迭代 A）：wss 留空=公共证书——caFP 为空，手机端（新 APK）走系统 CA 信任态
     if (f.relayUrl.startsWith('wss://') && f.caPath) {
       caFP = (await getHostAPI().relayCaFP(f.caPath)).caFP

@@ -231,7 +231,7 @@ export async function handlePair(input: string, deps: PairHandlerDeps): Promise<
   if (rest === '') {
     const config = await pm.getRelayConfig()
     if (!config) {
-      print('\n请先 /pair config 配置中继（relay 地址/运营者密钥/CA 路径）\n')
+      print('\n请先 /pair config 配置中继（relay 地址/运营者密钥/CA 路径）。\n中继需自建：npm install -g @assistant-ai/chill-relay 部署到你的 Linux 服务器（详见其 README）——地址/密钥/证书三件套都来自那场部署；有域名用公共证书（Let\x27s Encrypt 等）时无需任何 CA 文件（CA 留空）。\n')
       return
     }
     // 隐含启动 relay：配对要求桌面在线（hello 投进桌面信箱，须有人读）

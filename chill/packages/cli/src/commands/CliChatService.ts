@@ -27,6 +27,7 @@ import {
 } from '@assistant-ai/core'
 import { createCliChatEngine } from '../adapters/cliChatEngineFactory.js'
 import { isTuiActive } from '../tui/tuiState.js'
+import { getSelfTargetState } from './fetchSource.js'
 
 /**
  * 流式打印器工厂（[思考中]/[回复]/[工具调用] ANSI 范式，每次调用返回独立状态的一套）：
@@ -411,7 +412,13 @@ export class CliChatService {
         // auto-switch 与 switcher.js 路径（自迭代相关，npm 模式下改为注入"源码未安装"说明）
         const isNpmMode = getOwnProjectPaths().projectPath === null
         if (isNpmMode) {
-          lines.push('- 源码环境：未安装（npm 模式）。用户想修改 chill 自身源码时，引导其输入 /fetch-source 开启自迭代')
+          // 残留态分支（目标已就绪但本窗仍是 npm 初始版——接替失败/他窗 fetch）：磁盘目标态只许引导
+          // 动作、不许充当身份（双事实源禁令）。此提示必须放系统提示而非 SKILL.md——残留态 npm 窗
+          // 的技能注册表恰好过滤着 self-iterate，SKILL.md 微注是它永远读不到的文件
+          const target = getSelfTargetState()
+          lines.push(target.ready
+            ? '- 源码环境：已就绪（本窗为 npm 初始版，上次交接未完成）——引导用户新开 chill 窗口（首选）或重跑 /fetch-source 重试交接；勿在本窗修改源码'
+            : '- 源码环境：未安装（npm 模式）。用户想修改 chill 自身源码时，引导其输入 /fetch-source 开启自迭代')
         } else {
           const autoSwitch = await this.ctx.keyValueStore.getItem(AUTOSWITCH_AFTER_ITERATION_KEY)
           lines.push(`- auto-switch：${autoSwitch === 'true' ? '已开启 — 自迭代后自动切换版本' : '已关闭 — 自迭代后打开体验窗口'}`)

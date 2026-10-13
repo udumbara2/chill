@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -8,14 +8,35 @@ import { decompressArchive, downloadFile, getOwnProjectPaths } from '@assistant-
 /**
  * fetch-source：把 chill 源码按需下载到受管位置（~/.chill/workspace/），
  * 构建完成后写指针（~/.chill/current.json）使 bootstrap 委托到源码版本。
- * 仅在 npm 模式（无源码环境）下可用；npm 版本与双仓 tag 的对齐由 release.mjs 发布闸保证。
+ * 仅在 npm 模式（无源码环境）下可用；npm 版本与 GitHub tag 的对齐由 release.mjs 发布闸保证。
  */
 
-// 源码仓库地址（Gitee 优先，GitHub 兜底；CHILL_SOURCE_URL 环境变量可显式覆盖）
+// 源码仓库地址（GitHub 单源；CHILL_SOURCE_URL 环境变量可显式覆盖——网络不通时可指向任意镜像/代理）
+// 2026-10-14 裁决：Gitee 归档下载对匿名客户端是 4+ 年登录墙（2022 起实测），从未通过一次；
+// git 双模为收窄平台加复杂度被否决。三道门保留——单源同样需要真伪/形状/就位校验。
 const GITHUB_REPO = 'https://github.com/udumbara2/chill'
-const GITEE_REPO = 'https://gitee.com/assistant-ai/chill'
+// Gitee 仅作「浏览器手动下载」兜底（登录态可用）——非下载候选（匿名 HTTP 是登录墙）。
+// 链接按运行版本号实时计算（与 GitHub 候选同源同变量）：发新版自动指向新 tag，零存储零维护；
+// 前提=发布时把 tag 推到 Gitee（release.mjs 有软检查兜底）。
+const GITEE_MANUAL_REPO = 'https://gitee.com/assistant-ai/chill'
 
-// 源码归档约 3.5MB；慢网络（尤其 GitHub 兜底源）需要分钟级余量，downloadFile 默认 30s 是通用小文件语义
+/** 手动兜底：用户浏览器下载（Gitee 需登录）后把 zip 放到 workspace，重跑 /fetch-source 即被采用。
+ *  识别规则：精确名 chill-source.zip 优先；否则 workspace 里恰有唯一 *.zip 也认（浏览器下载名不可控，
+ *  强求精确改名是真实卡点——Gitee 下下来的叫什么就是什么）。多个 zip 歧义时按未放置处理。
+ *  用户只碰这一个文件——解压/四件套平铺/版本对账全部走既有管线与三道门，构造上不存在手动路径分叉。 */
+export function findManualSource(workspaceDir: string): string | null {
+  const exact = join(workspaceDir, 'chill-source.zip')
+  if (existsSync(exact)) return exact
+  try {
+    const zips = readdirSync(workspaceDir).filter((f) => f.toLowerCase().endsWith('.zip'))
+    if (zips.length === 1) return join(workspaceDir, zips[0])
+  } catch {
+    /* workspace 不可读按未放置处理 */
+  }
+  return null
+}
+
+// 源码归档约 6MB；慢网络需要分钟级余量，downloadFile 默认 30s 是通用小文件语义
 const DOWNLOAD_TIMEOUT_MS = 300_000
 
 export interface Pointer {
@@ -64,6 +85,17 @@ export function isSelfVersionUsable(home: string | null): boolean {
   return !!home && existsSync(join(home, 'packages', 'cli', 'dist', 'cli.js'))
 }
 
+/** 迭代目标环境现查（磁盘事实，非进程身份）：守卫文案/残留态提示用——只许引导动作，不许充当身份 */
+export interface SelfTargetState {
+  ready: boolean
+  home: string | null
+}
+export function getSelfTargetState(): SelfTargetState {
+  const p = readPointer()
+  if (p && p.active === 'self' && isSelfVersionUsable(p.home)) return { ready: true, home: p.home }
+  return { ready: false, home: null }
+}
+
 /** 包根推导：运行时文件恒为 dist/cli.js，而 dist 是包根的直接子目录（npm 包 / workspace
  *  源码版 / npx 缓存三种布局同构），一级向上即可——与 bootstrap.ts / cli.ts 读版本的既有
  *  正确写法对齐。旧版两级向上在 esbuild 内联布局下越过包根指向 node_modules，是 v0.0.0
@@ -97,12 +129,11 @@ function candidateUrls(version: string): string[] {
   const override = process.env.CHILL_SOURCE_URL
   if (override) return [override]
   return [
-    `${GITEE_REPO}/repository/archive/v${version}.zip`,
     `${GITHUB_REPO}/archive/refs/tags/v${version}.tar.gz`,
   ]
 }
 
-/** ①格式门：HTTP 200 ≠ 是压缩包（Gitee 归档登录墙实测回 44.8KB HTML 网页）。
+/** ①格式门：HTTP 200 ≠ 是压缩包（教训锚点：Gitee 归档登录墙曾回 44.8KB HTML 网页，2022-2026 实测）。
  *  魔数与扩展名对账，不符/为空/是网页 → 抛带分类话术的错误（进候选循环换下一源）。 */
 function verifyArchiveFormat(archivePath: string, url: string): void {
   const lowerUrl = url.toLowerCase()
@@ -276,30 +307,75 @@ export async function fetchSource(opts: FetchSourceOptions): Promise<FetchSource
     try {
       let extractedRoot: string | null = null
       const errors: string[] = []
-      for (const url of candidateUrls(version)) {
+      // 候选 #0：手动放置的源码包（GitHub 网络失败时的兜底路线）——用户显式意图，优先于网络
+      const manualPath = findManualSource(workspaceDir)
+      if (manualPath) {
         try {
-          const archivePath = join(tmp, url.endsWith('.zip') ? 'source.zip' : 'source.tar.gz')
-          log(`下载源码：${url}`)
-          await downloadFile(url, archivePath, DOWNLOAD_TIMEOUT_MS)
-          verifyArchiveFormat(archivePath, url) // ①格式门：200 ≠ 压缩包
+          log(`检测到手动放置的源码包：${manualPath}`)
+          verifyArchiveFormat(manualPath, manualPath) // ①格式门（按 .zip 扩展名映射魔数）
           const extractDir = join(tmp, 'extract')
           mkdirSync(extractDir, { recursive: true })
-          extractedRoot = await decompressArchive(archivePath, extractDir)
-          verifyExtractedLayout(extractedRoot) // ②内容门：形状=chill 源码归档才认
-          break
+          extractedRoot = await decompressArchive(manualPath, extractDir)
+          verifyExtractedLayout(extractedRoot) // ②内容门：形状不对的手动包照样拒
+          try {
+            unlinkSync(manualPath) // 消费即删（成功才删；失败保留文件供用户检查替换）
+          } catch {
+            log('（提示：源码包已采用，但原 zip 删除失败——可手动清理）')
+          }
+          log('手动源码包验证通过，已采用。')
         } catch (e: any) {
-          // 复位关键：②门在赋值后抛错时 extractedRoot 已带脏值，不复位会误判「已有产物」
           extractedRoot = null
-          errors.push(`${url} → ${e?.message ?? e}`)
-          log(`⚠ ${url}：${e?.message ?? e}（已自动尝试下一源）`)
-          // 失败的解压可能留下半成品，清场防污染下一个候选源的同名解压目录
+          errors.push(`手动源码包（${manualPath}）→ ${e?.message ?? e}`)
+          log(`⚠ 手动源码包未通过校验：${e?.message ?? e}（文件保留，继续尝试网络源）`)
           removeRecursive(join(tmp, 'extract'))
         }
       }
       if (!extractedRoot) {
-        // override 模式下用户已在用 CHILL_SOURCE_URL，再提示是语义矛盾
-        const hint = process.env.CHILL_SOURCE_URL ? '' : '\n可用 CHILL_SOURCE_URL 环境变量指定下载地址后重试。'
-        return { ok: false, message: `源码下载失败：\n${errors.join('\n')}${hint}` }
+        for (const url of candidateUrls(version)) {
+          try {
+            const archivePath = join(tmp, url.endsWith('.zip') ? 'source.zip' : 'source.tar.gz')
+            log(`下载源码：${url}`)
+            await downloadFile(url, archivePath, DOWNLOAD_TIMEOUT_MS)
+            verifyArchiveFormat(archivePath, url) // ①格式门：200 ≠ 压缩包
+            const extractDir = join(tmp, 'extract')
+            mkdirSync(extractDir, { recursive: true })
+            extractedRoot = await decompressArchive(archivePath, extractDir)
+            verifyExtractedLayout(extractedRoot) // ②内容门：形状=chill 源码归档才认
+            break
+          } catch (e: any) {
+            // 复位关键：②门在赋值后抛错时 extractedRoot 已带脏值，不复位会误判「已有产物」
+            extractedRoot = null
+            errors.push(`${url} → ${e?.message ?? e}`)
+            log(`⚠ ${url}：${e?.message ?? e}（已自动尝试下一源）`)
+            // 失败的解压可能留下半成品，清场防污染下一个候选源的同名解压目录
+            removeRecursive(join(tmp, 'extract'))
+          }
+        }
+      }
+      if (!extractedRoot) {
+        // 手动兜底指引在任何模式都给（万无一失）：tag 模式有版本号可算出精确 Gitee 链接；
+        // override 模式版本未知给短版（chill-source.zip 落包路径与校验管线对任何 zip 一样生效）
+        // tag 模式额外把目标文件夹直接替用户打开（照配对二维码弹 PNG 查看器先例）——
+        // 用户从终端抄路径、自己导航 Explorer 是可避免的摩擦；失败即可弹，回来时窗口已就位
+        let folderOpened = false
+        if (version && process.platform === 'win32') {
+          try {
+            spawn('explorer', [workspaceDir], { detached: true, stdio: 'ignore' }).unref()
+            folderOpened = true
+          } catch {
+            /* 打开失败不影响指引（路径文字仍在消息里） */
+          }
+        }
+        const manualHint = version
+          ? `\n手动兜底（无需配置任何环境变量）：
+1. 用浏览器打开 ${GITEE_MANUAL_REPO}/repository/archive/v${version}.zip （Gitee 需登录，注册即可）
+2. 把下载到的 zip 文件放到：${workspaceDir}\\（无需解压、文件名不限——目录里只放这一个 zip${folderOpened ? '；该文件夹已为你打开，下载完拖进去即可' : ''}）
+3. 重新输入 /fetch-source —— 程序会自动校验（含版本对账）、解压并就位到 ~/.chill/workspace/`
+          : `\n手动兜底：把 chill 源码 zip 文件（无需解压）放到 ${workspaceDir}\\ 后重新输入 /fetch-source（程序会自动校验并就位）。`
+        const overrideHint = process.env.CHILL_SOURCE_URL
+          ? '\n可用 CHILL_SOURCE_URL 环境变量指定下载地址后重试。'
+          : ''
+        return { ok: false, message: `源码下载失败：\n${errors.join('\n')}${manualHint}${overrideHint}` }
       }
       // 四件套容器布局（公开仓 v0.0.2 起）：归档根含 chill/ 子目录与兄弟件——拆到
       // workspace 平铺（chill=monorepo、chill-relay/chill-mobile=自迭代对象、
@@ -369,6 +445,19 @@ export async function fetchSource(opts: FetchSourceOptions): Promise<FetchSource
       message: '源码就位校验失败：workspace/chill 缺少 package.json 或 build:cli 脚本（不是可构建的 chill 源码）。已清场，可重新执行 /fetch-source。',
     }
   }
+  // .self.md 锚点门：isChillProjectRoot 的硬谓词（core projectPaths：.self.md ∧ packages/cli）——
+  // 缺它则接替新窗自锚定失败回落 npm 模式（技能过滤/路径缺失=失明在新窗复活）。发布侧由
+  // sync-public.ps1 断言把守，此处覆盖手动兜底 zip（用户自打包可能缺此文件）——发布/下载双端防御
+  if (!existsSync(join(projectDir, '.self.md'))) {
+    for (const piece of ['chill', 'chill-relay', 'chill-mobile', 'chill-guardian']) {
+      const p = join(workspaceDir, piece)
+      if (existsSync(p)) removeRecursive(p)
+    }
+    return {
+      ok: false,
+      message: '源码就位校验失败：workspace/chill 缺少 .self.md 自锚定文件（无法进入自迭代模式）。已清场，可重新执行 /fetch-source。',
+    }
+  }
   // 版本对账（tag 模式硬拒）：/fetch-source 的契约=「你正在运行的版本的源码」，不符即失败。
   // override 模式跳过（用户显式指定 URL=显式意图，本地验证语义）
   if (version && probe.cliVersion && probe.cliVersion !== version) {
@@ -390,6 +479,18 @@ export async function fetchSource(opts: FetchSourceOptions): Promise<FetchSource
   // CLI 对 native-desktop 是 esbuild external + 仓库预编译 .node 运行时懒加载，均非必需
   log('编译（pnpm build:cli，含 core）...')
   runIn(projectDir, 'pnpm build:cli')
+
+  // 探活门：构建成功 ≠ 运行可用（坏件交接给用户=死循环无出口——重启仍进坏件，chill --npm 逃生旗
+  // 此刻无人提示）。--version 是 relay 装配之前的快速出口，探针进程零副作用（不抢租约不连中继）
+  const cliJs = join(projectDir, 'packages', 'cli', 'dist', 'cli.js')
+  log('产物自检（cli.js --version）...')
+  const probeRun = spawnSync(process.execPath, [cliJs, '--version'], { timeout: 15000, encoding: 'utf8' })
+  if (probeRun.status !== 0) {
+    return {
+      ok: false,
+      message: `编译产物自检失败（cli.js --version 退出码 ${probeRun.status ?? 'null'}${probeRun.stderr ? `：${String(probeRun.stderr).slice(0, 300)}` : ''}），已保持 npm 模式，可重新执行 /fetch-source。`,
+    }
+  }
 
   // 构建成功后才写指针（失败则保持 npm 模式，可重入）
   writePointer('self', projectDir)

@@ -41,6 +41,8 @@ chill serve on        # 7×24 常驻宿主（定时任务持钟 + 手机遥控�
 `/pair config` 配好后 `chill serve on` + 扫码即用。三种形态全支持：家庭局域网明文 `ws://`
 （扫码时 App 有明文警示）、公网自签证书 wss（`/pair config` 填 CA 路径——**证书经二维码
 里的指纹锚定从你的中继获取，扫码即信任**）、公网 Let's Encrypt wss（CA 一栏留空=公共证书）。
+**ca.crt 从哪来**：自己部署中继时由服务器上的 `gen-certs.sh` 生成（拷回本机即可）；多人
+共用时向中继运营者索取；有域名用 Let's Encrypt 则完全不需要 CA 文件。
 同样的三项配置在**桌面 UI 和 Web UI（`chill web`）的设置页「手机」Tab** 也可填写并扫码配对
 （WebUI 页面开着时中继在线，关页自动让位给 CLI/serve——同一把租约锁，谁在线谁跑）。
 手机 App 从 GitHub Releases（udumbara2/chill）下载。
@@ -86,8 +88,13 @@ chill serve on        # 7×24 常驻宿主（定时任务持钟 + 手机遥控�
 /fetch-source   # 下载 chill 源码到 ~/.chill/workspace/ 并构建
 ```
 
-随后可让 chill 修改自身源码（修改发生在 workcopy 内，完成后经 `/switch-version` 切换、
-`/discard-version` 放弃）。`/use-self` / `/use-npm` 在自迭代版与 npm 官方版之间切换。
+构建完成并通过产物自检后，程序会**自动打开自迭代窗口并接续当前对话**（旧窗口自动退出，
+无需手动重启）；手机遥控连接也会自动跟到新窗口。随后可让 chill 修改自身源码（修改发生在
+workcopy 内，完成后经 `/switch-version` 切换、`/discard-version` 放弃）。`/use-self` /
+`/use-npm` 在自迭代版与 npm 官方版之间切换。
+
+已知取舍：`/fetch-source` 只构建 CLI 自迭代必需的目标（`build:cli`）——WebUI daemon 与桌面
+窗口产物在首次自迭代的 `build:user` 之后才出现在 workspace，属设计而非缺陷。
 
 ### 自迭代出问题时如何自救（三级逃生）
 
@@ -110,6 +117,11 @@ npm 官方包在整个自迭代过程中不会被改动——原版永远回得�
 源码归档为四件套（chill / chill-guardian / chill-relay / chill-mobile），`/fetch-source`
 一次拉齐到 `~/.chill/workspace/`——AI 亦可自迭代手机端（内置技能 mobile-iterate：改码、
 快照固化、构建推送出自己的 APK，需 JDK + Android SDK + 真机）。
+
+**网络下载失败时的手动兜底**：`/fetch-source` 默认从 GitHub 下载源码；若网络不通，
+按失败提示中的 Gitee 链接用浏览器手动下载 zip（Gitee 需登录，注册即可），把 zip 文件
+（无需解压，文件名不限）放到 `~/.chill/workspace/`——目录里只放这一个 zip——再重新输入
+`/fetch-source`，程序会自动识别、校验（含版本对账）、解压并就位，与网络下载走完全相同的管线。
 
 ### 前置要求：pnpm
 

@@ -16,12 +16,12 @@
  *       verify-pack 扫描闸（cli/壳包/relay）→ pnpm publish（workspace:* 由 pnpm 改写）。
  *
  * 用法：node scripts/release.mjs [--ref <分支/tag，默认 master>] [--dry-run]
- *                  [--github-only] [--otp <6位码>]
- * 前置纪律：发布前须在 GitHub（及 Gitee，除非 --github-only）打好指向发布提交的 v{version} tag——
+ *                  [--otp <6位码>]
+ * 前置纪律：发布前须在 GitHub 打好指向发布提交的 v{version} tag——
  * /fetch-source 按 npm 版本号下载对应 tag 的源码归档，tag 缺失或错位则该版本
  * 用户开启自迭代必败，脚本在 tag 闸 fail-fast 拦截。
- * --github-only：Gitee tag 豁免（显式决策 + 醒目留痕；fetchSource 自动兜底 GitHub 源，
- * Gitee 补齐 tag 后国内用户自动恢复快速源）。默认双仓全查。
+ * （2026-10-14 起 GitHub 单源：Gitee 归档对匿名客户端是 4+ 年登录墙，机制已整体退役；
+ *  Gitee 公开仓保留为纯浏览镜像，发布流程与之解耦。）
  * 禁止绕过本脚本在任何目录手动 npm publish。
  */
 import { mkdtempSync, mkdirSync, rmSync, copyFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -32,15 +32,13 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const REPO = 'https://github.com/udumbara2/chill.git';
-// 源码归档双仓（与 packages/cli/src/commands/fetchSource.ts 的 candidateUrls 同源同序）
+// 源码归档单源（与 packages/cli/src/commands/fetchSource.ts 的 candidateUrls 同源）
 const SOURCE_REPOS = [
-  ['Gitee', 'https://gitee.com/assistant-ai/chill.git'],
   ['GitHub', 'https://github.com/udumbara2/chill.git'],
 ];
 const args = process.argv.slice(2);
 const ref = args.includes('--ref') ? args[args.indexOf('--ref') + 1] : 'master';
 const dryRun = args.includes('--dry-run');
-const githubOnly = args.includes('--github-only');
 const otp = args.includes('--otp') ? args[args.indexOf('--otp') + 1] : null;
 // 现场供码（方案 B）：发布时刻轮询等待 OTP 文件出现——TOTP 鲜码即写即用即删
 const otpFile = args.includes('--otp-file') ? args[args.indexOf('--otp-file') + 1] : null;
@@ -80,11 +78,7 @@ function run(cmd, cmdArgs, cwd, label, retries = 1) {
  */
 function verifySourceTag(version, headSha) {
   const tag = `v${version}`;
-  const repos = githubOnly ? SOURCE_REPOS.filter(([, url]) => url === REPO) : SOURCE_REPOS;
-  if (githubOnly) {
-    console.log('⚠️  --github-only：Gitee tag 本版豁免（显式决策留痕）。fetchSource 自动兜底 GitHub 源；');
-    console.log('    Gitee 补齐 tag 后国内用户自动恢复快速源——补齐后请移除该旗标恢复双仓闸。');
-  }
+  const repos = SOURCE_REPOS;
   const problems = [];
   for (const [name, url] of repos) {
     const r = spawnSync('git', ['ls-remote', url, `refs/tags/${tag}`, `refs/tags/${tag}^{}`], { encoding: 'utf-8' });
@@ -108,6 +102,21 @@ function verifySourceTag(version, headSha) {
     process.exit(1);
   }
   console.log(`源码 tag 闸通过：v${version} 均指向 ${headSha.slice(0, 8)}（${repos.map(([n]) => n).join(' + ')}）`);
+  // 手动兜底链新鲜度软检查（2026-10-14）：fetch-source 的「GitHub 失败→Gitee 浏览器手动下载」兜底链接
+  // 按版本号实时计算，前提是 Gitee 侧存在同 SHA 的 tag。缺失/错位只警告不阻断（GitHub 单源闸已过，
+  // 影响仅限该版手动兜底链接）。这就是「链接自动保持最新」的机制锚：发布闸替你盯着。
+  try {
+    const g = spawnSync('git', ['ls-remote', 'https://gitee.com/assistant-ai/chill.git', `refs/tags/${tag}`, `refs/tags/${tag}^{}`], { encoding: 'utf8' });
+    const glines = (g.stdout || '').trim().split('\n').filter(Boolean);
+    const gpeeled = (glines.find((l) => l.endsWith('^{}')) ?? glines[0])?.split('\t')[0] ?? null;
+    if (!gpeeled) {
+      console.log(`⚠️  Gitee 缺少 tag ${tag}——/fetch-source 手动兜底链接（浏览器登录下载）该版将打不开。补推：git push gitee ${tag}`);
+    } else if (gpeeled !== headSha) {
+      console.log(`⚠️  Gitee tag ${tag} 指向 ${gpeeled.slice(0, 8)}（应为 ${headSha.slice(0, 8)}）——手动兜底会下到错位版本。修正：git push gitee -f ${tag}`);
+    } else {
+      console.log(`手动兜底链就绪：Gitee ${tag} → ${headSha.slice(0, 8)}（GitHub 失败时用户可浏览器手动下载源码包）`);
+    }
+  } catch { /* Gitee 探测异常不阻断发布 */ }
 }
 
 function publish(pkgDir, label) {
@@ -175,7 +184,7 @@ try {
 } catch { /* 清场失败不阻塞发布 */ }
 
 const work = mkdtempSync(join(tmpdir(), 'chill-release-'));
-console.log(`隐士发布工作区：${work}（ref=${ref}${dryRun ? '，dry-run' : ''}${githubOnly ? '，github-only' : ''}）`);
+console.log(`隐士发布工作区：${work}（ref=${ref}${dryRun ? '，dry-run' : ''}）`);
 
 try {
   run('git', ['clone', '--depth', '1', '--branch', ref, REPO, 'repo'], work, '1/8 干净克隆', 4);
@@ -241,7 +250,9 @@ try {
     console.error('   处理：git rm --cached .version.json && git commit && push 后重跑本脚本。');
     process.exit(1);
   }
-  // .self.md 必须保持追踪：fetch-source 的自锚定识别（isChillProjectRoot）依赖它存在于源码树
+  // .self.md 必须保持追踪：fetch-source 的自锚定识别（isChillProjectRoot 硬谓词：.self.md ∧ packages/cli）
+  // 依赖它存在于源码树。追踪由 sync-public.ps1 的 ls-files 断言把守（gitignore 已列，靠历史 add 续命——
+  // 一旦被 rm，add -A 静默跳过）；本脚本运行于无私库 git 语境，此处仅立注释互指。
 
   run('pnpm', ['install', '--frozen-lockfile'], mono, '5/8 安装依赖（monorepo）');
   run('npm', ['install', '--no-audit', '--no-fund'], relayDir, '5/8 安装依赖（chill-relay）');
