@@ -1,45 +1,17 @@
 /**
  * relayNodeStores.ts — CLI 侧 relay 持久化适配：
- * - FileRelayLockStore：~/.chill/relay.lock——W1 Phase C 起单源 core（tmp+rename 原子写；
- *   竞态窗口由租约心跳语义兜底，最坏=两端都跑，消息幂等去重）
- * - NodeDeviceStore：~/.chill/relay/devices.json（配对记录）
+ * - FileRelayLockStore / NodeDeviceStore / defaultDevicesPath：自 core 单源再导出
+ *   （账本单源化 2026-10-12——NodeDeviceStore 下沉 core implementations/relayNodeRuntime.ts，
+ *   daemon/electron main 经 RPC 薄适配复用同一实现；CLI 侧 import 零改动）
+ * - makeSeenIdsStore / makePendingRoundsStore：CLI 本地文件适配（暂无第二消费者）
  */
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import type { DeviceStore, PairedDevice } from '@assistant-ai/core'
 
-export { FileRelayLockStore } from '@assistant-ai/core'
-
-function atomicWriteJson(filePath: string, value: unknown): void {
-  mkdirSync(dirname(filePath), { recursive: true })
-  const tmp = `${filePath}.tmp-${process.pid}`
-  writeFileSync(tmp, JSON.stringify(value), 'utf8')
-  renameSync(tmp, filePath)
-}
-
-export class NodeDeviceStore implements DeviceStore {
-  constructor(private filePath: string) {}
-
-  async read(): Promise<PairedDevice[]> {
-    try {
-      const raw = JSON.parse(readFileSync(this.filePath, 'utf8'))
-      return Array.isArray(raw) ? raw : []
-    } catch {
-      return []
-    }
-  }
-
-  async write(devices: PairedDevice[]): Promise<void> {
-    atomicWriteJson(this.filePath, devices)
-  }
-}
+export { FileRelayLockStore, NodeDeviceStore, defaultDevicesPath } from '@assistant-ai/core'
 
 export function defaultRelayLockPath(userDataPath: string): string {
   return join(userDataPath, 'relay.lock')
-}
-
-export function defaultDevicesPath(userDataPath: string): string {
-  return join(userDataPath, 'relay', 'devices.json')
 }
 
 export function defaultSeenIdsPath(userDataPath: string): string {
@@ -68,10 +40,6 @@ export function makeSeenIdsStore(userDataPath: string): {
       renameSync(tmp, final)
     },
   }
-}
-
-export function relayStateExists(userDataPath: string): boolean {
-  return existsSync(defaultDevicesPath(userDataPath))
 }
 
 export function defaultPendingRoundsPath(userDataPath: string): string {

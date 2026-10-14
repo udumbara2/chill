@@ -288,6 +288,9 @@ export function createWsHost(from?: { token?: string; wsTarget?: string }): WsHo
     // readFileSync(undefined)（2026-10-12 WebUI 配对实测：保存配置/出码报 path undefined）
     relayCaFP: (p) => call('relay:ca-fp', { caPath: p }),
     relayCaCert: (p) => call('relay:ca-cert', { caPath: p }),
+    // 配对账本（devices.json 单源）：标准有回执 RPC，错误自然传播（配对落盘 fail-loud）
+    relayDevicesGet: () => call('relay:devices-get'),
+    relayDevicesSet: (devices) => call('relay:devices-set', devices),
     relayTransportConnect: (o) => call('relay:transport-connect', o),
     relayTransportClose: () => call('relay:transport-close'),
     onRelayTransportMessage: (cb) => subscribe('relay:transport-message', cb),

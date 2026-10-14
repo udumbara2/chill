@@ -363,6 +363,9 @@ const api: HostAPI = {
     ipcRenderer.invoke('relay:resolve-path', opts),
   relayCaFP: (caPath: string) => ipcRenderer.invoke('relay:ca-fp', { caPath }),
   relayCaCert: (caPath: string) => ipcRenderer.invoke('relay:ca-cert', { caPath }),
+  // 配对账本（devices.json 单源）：有回执 invoke，错误传播（配对落盘 fail-loud）
+  relayDevicesGet: () => ipcRenderer.invoke('relay:devices-get'),
+  relayDevicesSet: (devices) => ipcRenderer.invoke('relay:devices-set', devices),
   relayTransportConnect: (opts: { relayUrl: string; mailboxId: string; readToken: string; caPath?: string }) =>
     ipcRenderer.invoke('relay:transport-connect', opts),
   relayTransportClose: () => ipcRenderer.invoke('relay:transport-close'),

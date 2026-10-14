@@ -101,6 +101,9 @@ export const IPC_CHANNELS = {
   RELAY_CA_FP: 'relay:ca-fp',
   /** 凭证入码（规划迭代 C）：CA 文件 → QR caCert 载荷（PEM/DER + 容量闸，core 纯函数） */
   RELAY_CA_CERT: 'relay:ca-cert',
+  /** 配对账本（devices.json 单源，账本单源化 2026-10-12）：渲染层无 fs，读写经主进程 store */
+  RELAY_DEVICES_GET: 'relay:devices-get',
+  RELAY_DEVICES_SET: 'relay:devices-set',
   RELAY_TRANSPORT_CONNECT: 'relay:transport-connect',
   RELAY_TRANSPORT_CLOSE: 'relay:transport-close',
   RELAY_TRANSPORT_MESSAGE: 'relay:transport-message',

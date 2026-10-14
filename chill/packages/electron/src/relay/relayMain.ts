@@ -21,7 +21,9 @@ import {
   relayNodeHttpPutBinary,
   FileRelayLockStore,
   RelayLeaseHost,
+  NodeDeviceStore,
   caFingerprint,
+  type PairedDevice,
 } from '@assistant-ai/core'
 import { IPC_CHANNELS } from '../ipcChannels'
 
@@ -41,6 +43,9 @@ function send(channel: string, payload: unknown): void {
 function relayLockPath(): string {
   return join(homedir(), '.chill', 'relay.lock')
 }
+
+/** 配对账本（devices.json 单源，账本单源化 2026-10-12）——与 CLI/daemon 同一 core 实现 */
+const devicesStore = new NodeDeviceStore(join(homedir(), '.chill', 'relay', 'devices.json'))
 
 function ensureLease(): RelayLeaseHost {
   if (!lease) {
@@ -162,6 +167,28 @@ export function registerRelayIpc(getMainWindow: () => BrowserWindow | null): voi
   // 配对依赖此通道）；读失败 reject 由渲染层呈现（信任锚不静默降级）
   ipcMain.handle(IPC_CHANNELS.RELAY_CA_CERT, async (_e, opts: { caPath: string }) => {
     return { caB64: readFileSync(opts.caPath).toString('base64') }
+  })
+
+  // 配对账本（devices.json 单源，账本单源化 2026-10-12）：读=store（首读含惰性遗留收敛）；
+  // 写=载荷形状校验+原子写，失败 throw → invoke reject 回渲染层（配对 fail-loud）
+  ipcMain.handle(IPC_CHANNELS.RELAY_DEVICES_GET, async () => {
+    return devicesStore.read()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.RELAY_DEVICES_SET, async (_e, devices: unknown) => {
+    if (!Array.isArray(devices)) throw new Error('配对记录载荷必须是数组')
+    for (const x of devices) {
+      const e = x as Partial<PairedDevice> | null
+      if (
+        !e || typeof e !== 'object' ||
+        typeof e.phonePub !== 'string' || e.phonePub.length === 0 ||
+        typeof e.device !== 'string'
+      ) {
+        throw new Error('配对记录条目形状不合法（需 phonePub/device 字符串）')
+      }
+    }
+    await devicesStore.write(devices as PairedDevice[])
+    return null
   })
 
   ipcMain.handle(

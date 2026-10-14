@@ -11,7 +11,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -485,6 +485,51 @@ test('wsHost.relayCaFP/relayCaCert 载荷形状（{caPath} 包装；漏包即 da
     assert.ok(cert.caB64.length > 10, '材料非空')
 
     api.close()
+  } finally {
+    await stopDaemon(daemon)
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('e2e 配对账本：relayDevicesGet/Set 履约（单源 devices.json + 形状校验 + 写失败 reject）', async () => {
+  const root = tempRoot()
+  const { daemon, token } = await startDaemon(5300, root)
+  try {
+    const api = (await import('../../ui/src/host/wsHost')).createWsHost({ token, wsTarget: '127.0.0.1:5300' })
+    await api.ready
+
+    // ① 空态：无 devices.json → get 返回 []（迁移 no-op，不创建 state.json）
+    assert.deepEqual(await api.api.relayDevicesGet(), [])
+
+    // ② 写读回环：set → get 读己之写；落盘到 <root>/relay/devices.json（单源真相文件）
+    const dev = [{ phonePub: 'pub-contract', device: 'Phone-Test', pairedAt: '2026-10-12T00:00:00.000Z' }]
+    await api.api.relayDevicesSet(dev)
+    assert.deepEqual(await api.api.relayDevicesGet(), dev)
+    const onDisk = JSON.parse(readFileSync(join(root, 'relay', 'devices.json'), 'utf8'))
+    assert.deepEqual(onDisk, dev, '真相落点=<user-data>/relay/devices.json')
+
+    // ③ 形状校验 fail-loud：非数组 / 缺 phonePub 条目 → RPC reject（配对 UI 据此显式失败）
+    await assert.rejects(() => api.api.relayDevicesSet('not-array' as never), /必须是数组/)
+    await assert.rejects(() => api.api.relayDevicesSet([{ device: 'X' } as never]), /phonePub/)
+
+    // ④ 写失败注入（A3 手法：devices.json 预置为目录 → 原子写 rename 落不上）→ reject；daemon 存活
+    api.close()
+    await stopDaemon(daemon)
+    rmSync(join(root, 'relay', 'devices.json'))
+    mkdirSync(join(root, 'relay', 'devices.json'))
+    const { daemon: d2, token: t2 } = await startDaemon(5300, root)
+    const api2 = (await import('../../ui/src/host/wsHost')).createWsHost({ token: t2, wsTarget: '127.0.0.1:5300' })
+    await api2.ready
+    await assert.rejects(
+      () => api2.api.relayDevicesSet([{ phonePub: 'p2', device: 'D', pairedAt: '2026-10-12T01:00:00.000Z' }]),
+      (err: Error) => {
+        assert.ok(!/Unknown method|未知方法/.test(err.message), `应为写失败而非方法缺失: ${err.message}`)
+        return true
+      },
+    )
+    assert.deepEqual(await api2.api.relayDevicesGet(), [], 'daemon 经受写失败仍存活')
+    api2.close()
+    await stopDaemon(d2)
   } finally {
     await stopDaemon(daemon)
     rmSync(root, { recursive: true, force: true })

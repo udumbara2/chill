@@ -144,7 +144,7 @@ test('网关：最后一条连接断开 → 全拆（双保险）；旁观者断
   }
 })
 
-test('网关：stop 幂等；dispatch 注册面完整（14 方法中的无连接依赖项）', async () => {
+test('网关：stop 幂等；dispatch 注册面完整（15 方法中的无连接依赖项）', async () => {
   const root = tempRoot()
   try {
     const h = makeGateway(root)
@@ -162,6 +162,8 @@ test('网关：stop 幂等；dispatch 注册面完整（14 方法中的无连接
       'relay:resolve-path',
       'relay:ca-fp',
       'relay:ca-cert',
+      'relay:devices-get',
+      'relay:devices-set',
       'relay:transport-close',
       'relay:catalog-state',
     ]) {

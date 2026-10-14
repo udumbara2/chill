@@ -816,7 +816,7 @@ if (serveMode) {
   if (!serveRelayConfig || serveDevices.length === 0) {
     process.stderr.write(
       `✗ serve 未就绪：${!serveRelayConfig ? '中继未配置' : '尚无已配对设备'}。\n` +
-      '  请先在交互终端运行 chill，经 /pair 完成配置与配对，再启动 serve（或 chill serve on）。\n'
+      '  请先完成配置与配对（交互终端 chill 内 /pair，或桌面/WebUI 设置页），再启动 serve（或 chill serve on）。\n'
     )
     process.exit(2)
   }

@@ -267,7 +267,10 @@ export class PairingManager {
     // 旧配对的凭据在服务器上随之失效——本地若保留旧记录，bridge 会拿死令牌连出 401/1006 循环。
     const next = [{ phonePub, device, pairedAt: new Date(this.now()).toISOString() }]
     await this.deviceStore.write(next)
-    await this.secureStorage.storeApiKey(RELAY_KEYS.pairingToken, pairingToken)
+    // fail-loud（账本单源化 F7）：storeApiKey 返回 boolean 且历史被忽略——配对令牌写失败
+    // 必须让配对报失败，否则 hello/confirm 的 pairingMAC 重验拿不到本地 HMAC key。
+    const tokenStored = await this.secureStorage.storeApiKey(RELAY_KEYS.pairingToken, pairingToken)
+    if (!tokenStored) throw new Error('配对令牌写入安全存储失败——配对未完成，请重试配对')
   }
 
   async listDevices(): Promise<PairedDevice[]> {
@@ -292,7 +295,9 @@ export class PairingManager {
 
   /** 提前留存配对令牌（/pair 出码即存：跨端配对时当前在线端的 bridge 懒读它验 pairingMAC） */
   async savePairingToken(token: string): Promise<void> {
-    await this.secureStorage.storeApiKey(RELAY_KEYS.pairingToken, token)
+    // fail-loud（F7 同族）：跨端配对时当前在线端懒读此值验 pairingMAC——写失败须即刻暴露
+    const ok = await this.secureStorage.storeApiKey(RELAY_KEYS.pairingToken, token)
+    if (!ok) throw new Error('配对令牌写入安全存储失败——请重试出码')
   }
 
   /**

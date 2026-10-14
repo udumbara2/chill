@@ -210,6 +210,8 @@ function cmdOn(): void {
   }
   // D14 预检：已配对设备（devices.json 是 /pair 成功的产物，config 先于配对存在）。
   // 在安装期 fail fast，防注册出"每次登录秒退"的坏自启循环。
+  // 账本单源化（2026-10-12）：devices.json 为唯一真相源——任意壳（终端 /pair、桌面/WebUI）
+  // 配对都直写此文件，serve 预检即所见即所得（不做遗留迁移：用户裁定从零安装重配）。
   let deviceCount = 0
   try {
     const devices = JSON.parse(readFileSync(DEVICES_PATH, 'utf8'))
@@ -218,7 +220,7 @@ function cmdOn(): void {
     /* 无设备文件=未配对 */
   }
   if (deviceCount === 0) {
-    process.stderr.write('✗ 尚无已配对设备——先在交互终端运行 chill，经 /pair 完成配置与配对，再 chill serve on\n')
+    process.stderr.write('✗ 尚无已配对设备——先完成配对（交互终端 chill 内 /pair，或桌面/WebUI 设置页），再 chill serve on\n')
     process.exit(2)
   }
   const shim = join(process.env.APPDATA!, 'npm', 'chill.cmd')

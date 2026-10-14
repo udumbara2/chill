@@ -55,21 +55,18 @@ import { loadSession } from '../adapters/sessionStorage'
 import { usePermissionModeStore } from '../stores/permissionModeStore'
 import { getChatEngine, getActiveSessionId, getActiveEngineOrNull, openSession, getEngineWorkDir, closeSession } from './chatEngine'
 
-const DEVICES_KV_KEY = 'relay.devices'
-
-class KVDeviceStore implements DeviceStore {
-  private kv = new IPCKeyValueStore()
+/**
+ * 配对账本适配（账本单源化 2026-10-12）：唯一真相源=宿主侧 ~/.chill/relay/devices.json
+ * （daemon/electron main 持 core NodeDeviceStore）。本适配=有回执 RPC 薄壳——写失败
+ * reject 传播（配对 fail-loud），取代旧 KVDeviceStore（state.json KV 键 +「写失败静默」
+ * ——正是 WebUI 配对成功而 serve 读不到的事故根源；旧键为无读者惰性遗留数据，永不迁移）。
+ */
+class HostDeviceStore implements DeviceStore {
   async read(): Promise<PairedDevice[]> {
-    try {
-      const raw = this.kv.getItem(DEVICES_KV_KEY)
-      const parsed = raw ? JSON.parse(raw) : []
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
+    return getHostAPI().relayDevicesGet()
   }
   async write(devices: PairedDevice[]): Promise<void> {
-    this.kv.setItem(DEVICES_KV_KEY, JSON.stringify(devices))
+    await getHostAPI().relayDevicesSet(devices)
   }
 }
 
@@ -79,7 +76,7 @@ export function getPairingManager(): PairingManager {
   if (!pairingManager) {
     pairingManager = new PairingManager({
       secureStorage: new ElectronSecureStorage(),
-      deviceStore: new KVDeviceStore(),
+      deviceStore: new HostDeviceStore(),
     })
   }
   return pairingManager
@@ -484,9 +481,19 @@ export async function startPairingSession(name: string): Promise<PairingSession>
       if (result.state !== 'redeemed') {
         return { ok: false, message: result.state === 'expired' ? '配对令牌已过期，请重新出码' : '配对超时，请重新出码' }
       }
-      await pm.completePairing(result.phonePub, result.device, qr.token)
+      // F9 边界翻译（账本单源化）：wait() 契约=总是 resolve {ok,message}——持久层 fail-loud
+      // （completePairing/attachPeer reject）在此译为人类可读失败，组件层零改动。
+      try {
+        await pm.completePairing(result.phonePub, result.device, qr.token)
+      } catch (err) {
+        return { ok: false, message: `配对记录保存失败：${err instanceof Error ? err.message : String(err)}` }
+      }
       if (startResult === 'started') {
-        await attachPeer({ phonePub: result.phonePub, device: result.device, pairedAt: new Date().toISOString() }, qr.token, false)
+        try {
+          await attachPeer({ phonePub: result.phonePub, device: result.device, pairedAt: new Date().toISOString() }, qr.token, false)
+        } catch (err) {
+          return { ok: false, message: `配对已登记，但连接挂载失败：${err instanceof Error ? err.message : String(err)}（serve 或重开应用后将自动重连）` }
+        }
         return { ok: true, message: `手机已登记：${result.device}，请在弹窗中确认配对` }
       }
       return { ok: true, message: '配对确认将出现在当前在线的 chill 端' }

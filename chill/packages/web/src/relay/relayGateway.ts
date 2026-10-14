@@ -25,9 +25,11 @@ import {
   relayNodeHttpPutBinary,
   FileRelayLockStore,
   RelayLeaseHost,
+  NodeDeviceStore,
   caFingerprint,
   buildCatalogStateBody,
   wireSessionCatalogWatch,
+  type PairedDevice,
 } from '@assistant-ai/core'
 
 type Broadcast = (name: string, payload: unknown) => void
@@ -54,6 +56,8 @@ export interface RelayGatewayDeps {
   hasClients: () => boolean
   /** relay.lock 路径（~/.chill/relay.lock——与 CLI/Electron 同一把锁） */
   lockPath: string
+  /** 配对账本（~/.chill/relay/devices.json——三壳单源；账本单源化 2026-10-12） */
+  devicesStore: NodeDeviceStore
   sessionsDir: string
   listProjects: () => Promise<unknown[]>
   /** 预览/体验形态守卫（照 electron M3.2 约定：体验形态不连 relay，确定性由正式实例服务） */
@@ -120,6 +124,24 @@ export class RelayGateway {
     d.set('relay:ca-cert', (o: { caPath: string }) => ({
       caB64: readFileSync(o.caPath).toString('base64'),
     }))
+    // 配对账本（devices.json 单源）：读=store.read（首读含惰性遗留收敛）；写=载荷形状校验+原子写，
+    // 失败抛错 → serve.ts 回 ok:false → 渲染层 call() reject（配对 fail-loud，2026-10-12）
+    d.set('relay:devices-get', async () => this.deps.devicesStore.read())
+    d.set('relay:devices-set', async (devices: unknown) => {
+      if (!Array.isArray(devices)) throw new Error('配对记录载荷必须是数组')
+      for (const x of devices) {
+        const e = x as Partial<PairedDevice> | null
+        if (
+          !e || typeof e !== 'object' ||
+          typeof e.phonePub !== 'string' || e.phonePub.length === 0 ||
+          typeof e.device !== 'string'
+        ) {
+          throw new Error('配对记录条目形状不合法（需 phonePub/device 字符串）')
+        }
+      }
+      await this.deps.devicesStore.write(devices as PairedDevice[])
+      return null
+    })
     d.set('relay:transport-close', () => {
       this.teardownTransport()
       return { ok: true }

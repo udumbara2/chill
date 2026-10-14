@@ -17,7 +17,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { NodePathProvider, registerInstance, watchVersionToken, TaskStore, SchedulerService, NodeFileSystemProvider, setSessionTaskCleaner } from '@assistant-ai/core'
+import { NodePathProvider, registerInstance, watchVersionToken, TaskStore, SchedulerService, NodeFileSystemProvider, setSessionTaskCleaner, NodeDeviceStore } from '@assistant-ai/core'
 import { parseFrame, resFrame, evFrame } from './wsChannel'
 import { createDispatch } from './hostApiServer'
 import { KvGateway } from './capabilities/kvGateway'
@@ -236,6 +236,10 @@ const relayGateway = new RelayGateway({
   broadcast,
   hasClients: () => connections.size > 0,
   lockPath: join(homedir(), '.chill', 'relay.lock'),
+  // 配对账本单源（2026-10-12）：跟随 daemon userDataPath（生产=~/.chill；测试 --user-data 隔离）——
+  // 与 CLI/electron main 同一 store 实现（勿抄 lockPath 的 homedir 硬编码：lock 是机器级仲裁故意的，
+  // 账本是用户数据；契约测试靠 --user-data 隔离，硬编码会读写真实用户目录）
+  devicesStore: new NodeDeviceStore(join(userDataPath, 'relay', 'devices.json')),
   sessionsDir: sessions.getSessionsDir(),
   listProjects: async () => ((await sessions.projectList()) as { records?: unknown[] }).records ?? [],
   isPreview: () => bundleDir.includes('chill-workcopy'),

@@ -18,7 +18,7 @@
 import http from 'node:http'
 import https from 'node:https'
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import WebSocket from 'ws'
 import {
   RelayLockArbiter,
@@ -27,6 +27,7 @@ import {
   type RelayLockState,
 } from '../services/relay/relayLock'
 import { WS_KEEPALIVE_PING_INTERVAL_MS, keepaliveAction } from '../services/relay/wsKeepalive'
+import type { PairedDevice, DeviceStore } from '../services/relay/PairingManager'
 
 // ==================== ① WS 传输（读长连，纯接收向） ====================
 
@@ -436,5 +437,57 @@ export class RelayLeaseHost {
       clearInterval(this.heartbeat)
       this.heartbeat = null
     }
+  }
+}
+
+// ==================== ⑤ 配对账本存储（devices.json 单源；《配对账本单源化》2026-10-12） ====================
+//
+// 病灶回顾：配对记录曾按壳分裂双账（CLI=devices.json / UI 壳=state.json 的 relay.devices KV 键），
+// serve 只认前者 → WebUI 配对成功而 `chill serve on` 报「尚无已配对设备」。本节为三壳唯一账本：
+// CLI 直用本类；WebUI daemon / electron main 经 relay:devices-get/set RPC 薄适配后同样用本类。
+// 写语义铁律：tmp+rename 原子 + 错必抛（配对是安全关键操作，失败要大声）。
+// （用户 2026-10-13 裁定不做遗留迁移——存量机从零安装重配；state.json 里的旧 relay.devices
+//  键就此成为无读者的惰性遗留数据，永不迁移。）
+
+function atomicWriteJson(filePath: string, value: unknown): void {
+  mkdirSync(dirname(filePath), { recursive: true })
+  const tmp = `${filePath}.tmp-${process.pid}`
+  writeFileSync(tmp, JSON.stringify(value), 'utf8')
+  renameSync(tmp, filePath)
+}
+
+/** 账本条目形状判定（缺失 phonePub 的条目剔除——防渲染层缺陷写入垃圾账本） */
+function isValidDeviceEntry(x: unknown): x is PairedDevice {
+  return (
+    !!x &&
+    typeof x === 'object' &&
+    typeof (x as PairedDevice).phonePub === 'string' &&
+    (x as PairedDevice).phonePub.length > 0 &&
+    typeof (x as PairedDevice).device === 'string'
+  )
+}
+
+export function defaultDevicesPath(userDataPath: string): string {
+  return join(userDataPath, 'relay', 'devices.json')
+}
+
+/**
+ * 配对账本的唯一 Node 实现（CLI 直用；daemon/electron main 经 RPC 薄适配复用）。
+ * read 对缺失/损坏/非数组一律返回空（自愈面：重配对覆写重建）；write 原子全量替换。
+ */
+export class NodeDeviceStore implements DeviceStore {
+  constructor(private filePath: string) {}
+
+  async read(): Promise<PairedDevice[]> {
+    try {
+      const raw: unknown = JSON.parse(readFileSync(this.filePath, 'utf8'))
+      return Array.isArray(raw) ? raw.filter(isValidDeviceEntry) : []
+    } catch {
+      return []
+    }
+  }
+
+  async write(devices: PairedDevice[]): Promise<void> {
+    atomicWriteJson(this.filePath, devices)
   }
 }

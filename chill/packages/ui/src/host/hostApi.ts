@@ -15,7 +15,7 @@
  * 红线：Node 侧（daemon 等）仅允许 `import type`（编译期擦除）——
  * 防止渲染层运行时代码被拖进 Node 产物。
  */
-import type { CatalogStateBody, WorkerMcpHookCall } from '@assistant-ai/core'
+import type { CatalogStateBody, WorkerMcpHookCall, PairedDevice } from '@assistant-ai/core'
 
 // ---------- 连接态语义（Web 宿主用；桌面宿主恒为 connected，不实现事件） ----------
 
@@ -291,6 +291,12 @@ export interface HostAPI {
   relayCaFP: (caPath: string) => Promise<{ caFP: string }>
   /** 配对小码 R2：CA 文件原始字节 base64（供铸造上传；渲染进程无 fs，UI-only 配对依赖此通道） */
   relayCaCert: (caPath: string) => Promise<{ caB64: string }>
+  /**
+   * 配对账本（devices.json 单源，2026-10-12 账本单源化）：渲染层无 fs，配对记录读写必经宿主。
+   * 有回执 RPC——写失败 reject 回渲染层（配对 fail-loud），严禁 kv 式吞错形态。
+   */
+  relayDevicesGet: () => Promise<PairedDevice[]>
+  relayDevicesSet: (devices: PairedDevice[]) => Promise<void>
   relayTransportConnect: (opts: {
     relayUrl: string
     mailboxId: string
